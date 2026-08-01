@@ -1,5 +1,6 @@
-
 # 💸 Cashkey - Visualize your cash flow
+
+Forked from ginatrapani/cashkey.
 
 Cashkey is a web application that helps users visualize their annual cash flow with a Sankey diagram. The app makes it easy to track income sources and expenses, see the balance, and share the visualization with others.
 
@@ -7,7 +8,7 @@ Cashkey is a web application that helps users visualize their annual cash flow w
 
 - Money is like water. It flows in and out of our lives.
 - Many people don’t know how their money comes and goes.
-- Sankey diagrams are great for visualizing things that flow. 
+- Sankey diagrams are great for visualizing things that flow.
 - Sankey diagrams are not a chart type offered natively in spreadsheet apps. Sankey makers (like the awesome [Sankeymatic](https://sankeymatic.com/build/)) still require markup and math that's easy to botch.
 - Cashkey builds a Sankey diagram your cash flow quickly and easily and keeps it private-no data gets sent to a server or stored in a database, it's all in the URL you can choose to bookmark or share.
 
