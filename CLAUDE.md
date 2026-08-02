@@ -96,7 +96,7 @@ vulnerabilities). Removed during that work:
 | Package                             | Why                                                                                                                  |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `next-themes@0.2.1`                 | Transitively pulled in all of Next.js and sharp — source of a critical advisory. App has no dark mode; not replaced. |
-| `uuid`                              | Replaced with native `crypto.randomUUID()`                                                                           |
+| `uuid` / `@types/uuid`              | Replaced with native `crypto.randomUUID()`. `@types/uuid` was left orphaned and removed later, in PR 0.0.            |
 | `react-router-dom` / `react-router` | App is single-page. Patched version required React 19; router removed instead. `NotFound.tsx` deleted.               |
 
 `baseUrl` was removed from `tsconfig.app.json` (deprecated in TS 6, removed in
@@ -114,9 +114,11 @@ single stale scaffold dependency.
 
 | Item            | Notes                                                                                                          |
 | --------------- | -------------------------------------------------------------------------------------------------------------- |
-| ESLint 8.57.1   | End of life. Flat config migration to ESLint 9/10 is its own branch.                                           |
+| ESLint 8.57.1   | End of life. The config is already flat and passing as of PR 0.0; what remains is the version upgrade to 9/10.  |
+| Quarantined `any` | PR 0.0 scoped `no-explicit-any` off for `SankeyDiagram.tsx` and `src/components/sankey/**` — 26 sites, all d3-sankey layout objects. The rule stays an error everywhere else. **The exemption covers existing code only, not new work.** New functions and components in those files must be typed — PR 1.5 adds a fourth Sankey column, so this lands during the phase where typing matters most. Where d3-sankey's types genuinely fight back, use a line-level `eslint-disable-next-line` rather than leaning on the file-level exemption. |
 | Tailwind v3     | v4 would clear the `sucrase → glob → minimatch → brace-expansion` dev advisory chain. Config migration.        |
-| `strict: false` | Scaffolded code likely won't survive `strict: true`. Any _new_ file should be written strict-clean regardless. |
+| Vite 5 → 6      | Two drivers converging on one branch. **Tooling:** Vitest 4 peers on Vite `^6 \|\| ^7 \|\| ^8`, so Vite 5 forces Vitest to stay on 3.2.x. **Security:** the esbuild dev advisory (GHSA-67mh-4wv8-2f99 — esbuild `<=0.24.2` via Vite `<=6.4.2`) clears on the upgrade. Dev tree only; `npm audit --omit=dev` is 0 either way. |
+| Partial `strict`  | `tsconfig.app.json` sets `strict: true`, but `noImplicitAny: false` there and `strictNullChecks: false` in the root config defeat most of it. Any _new_ file should be written fully strict-clean regardless. |
 | Bundle size     | 484 kB single chunk. Not urgent.                                                                               |
 | React 18        | Noted in case a dependency forces React 19 later.                                                              |
 
