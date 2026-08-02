@@ -64,6 +64,17 @@ Before changing the shape, add the mechanism for changing the shape.
 **Note:** this is the single most important PR in the plan. Every legacy
 `?data=` link Lenny has ever bookmarked or shared depends on it.
 
+**Carried over from PR 0.2.** Characterizing the current decode path surfaced
+seven defects. Two data-loss bugs and the multi-layer unwrapping were fixed in
+PR 0.2b. The three below were deferred to here, where the validation layer is
+being built anyway, and must not be lost:
+
+| # | Defect | Why it matters |
+|---|---|---|
+| Q4 | A scalar JSON payload — `?data=123`, `?data=true` — decodes to an empty **but truthy** state rather than a failure. `Index.tsx` only seeds sample data when the result is falsy, so the app renders blank | One line to fix once the result type from PR 0.2b is in place. Locked in by an existing characterization test that must be flipped |
+| Q6 | `encodeState` returns `""` when serialization fails, which `decodeState` reads as "no data in the URL" | A write failure is indistinguishable from an empty URL — the same conflation PR 0.2b removed from the read path |
+| Q7 | Decode failures report to `console.error` only | No user-visible signal. PR 0.2b added a toast for invalid links and dropped items; extend it to cover migration failures |
+
 ### PR 1.2 — Emoji as separate field
 **Requirements:** R-DM-2
 

@@ -50,15 +50,42 @@ Sharing a budget means sharing a URL.
 is being added for the saved-budget library, but URL sharing is not being
 replaced.
 
-Key behaviors:
+The two lists below were previously one list, which is how an inverted claim
+about encoding survived unnoticed. Keep them apart: the first describes what
+the code does, the second describes what we require of it.
 
-- Write with `history.replaceState`, never `pushState` — otherwise every
-  keystroke becomes a back-button entry
-- Debounce URL writes (~300ms) so typing doesn't thrash
-- **Never trust the URL.** Validate on read; malformed input must not crash
-  the app
-- Watch for double-encoding — links in the wild sometimes arrive with `%257B`
-  where the app wrote `%7B`. Detect and unwrap
+#### How it works today
+
+Verified by `src/utils/urlUtils.test.ts` (PR 0.2).
+
+- **The app writes two layers of percent-encoding.** `encodeState`
+  percent-encodes the JSON, then `URLSearchParams.set` encodes the resulting
+  `%` signs again. What lands in the address bar is `%257B`, not `%7B`
+- Reading reverses both: `searchParams.get` peels one layer, `decodeState`
+  peels the second
+- **This is correct. Do not "fix" it.** Two layers on, two layers off, and it
+  round-trips clean. Collapsing to a single layer would break every link ever
+  shared — which is every link, since this is how the app has always written
+  them
+- Writes go through `history.replaceState`
+- The 2,971-character fixture in `src/utils/urlUtils.fixtures.ts` is a real
+  share link and is the regression anchor for all of the above
+
+An earlier version of this section had it backwards, describing links as
+_arriving_ with `%257B` "where the app wrote `%7B`". Nothing strips or adds a
+layer in transit; the app writes both layers itself.
+
+#### Invariants to maintain
+
+- `history.replaceState`, never `pushState` — otherwise every keystroke
+  becomes a back-button entry
+- **Never trust the URL.** Malformed input must not crash the app, and must
+  not silently discard a budget either. Failing to parse is not the same as
+  finding no data, and the two must not share a code path
+- Multiple encoding layers must be detected and unwrapped rather than assumed
+  (R-PER-1)
+- The PR 0.2 fixtures must keep loading through every schema migration
+- **Not yet implemented:** debouncing URL writes. See the deferred-debt table
 
 ### Single page
 
@@ -141,6 +168,7 @@ single stale scaffold dependency.
 | Tailwind v3     | v4 would clear the `sucrase → glob → minimatch → brace-expansion` dev advisory chain. Config migration.        |
 | Vite 5 → 6      | Two drivers converging on one branch. **Tooling:** Vitest 4 peers on Vite `^6 \|\| ^7 \|\| ^8`, so Vite 5 forces Vitest to stay on 3.2.x. **Security:** the esbuild dev advisory (GHSA-67mh-4wv8-2f99 — esbuild `<=0.24.2` via Vite `<=6.4.2`) clears on the upgrade. Dev tree only; `npm audit --omit=dev` is 0 either way. |
 | Partial `strict`  | `tsconfig.app.json` sets `strict: true`, but `noImplicitAny: false` there and `strictNullChecks: false` in the root config defeat most of it. Any _new_ file should be written fully strict-clean regardless. |
+| Undebounced URL writes | `Index.tsx` calls `updateUrlWithState` from a `useEffect` on every change to `incomes` or `expenses` — a `replaceState` per keystroke, with no debounce anywhere. This document previously claimed a ~300ms debounce existed; it never did. **Phase 1 watch item:** measure it when PR 1.5 lands subcategories, since the payload and the re-render cost both grow. Fix if it degrades, not before. |
 | Bundle size     | 484 kB single chunk. Not urgent.                                                                               |
 | React 18        | Noted in case a dependency forces React 19 later.                                                              |
 
