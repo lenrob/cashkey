@@ -21,17 +21,17 @@ patch set intended for upstream.
 
 ## Stack
 
-| Layer | Choice |
-|---|---|
-| Framework | React 18.3.1 |
-| Language | TypeScript |
-| Build | Vite 5.4.21 |
-| Styling | Tailwind CSS 3.4.17 |
-| Components | shadcn/ui |
-| Visualization | d3-sankey |
-| Persistence | URL query string, plus localStorage (being added) |
-| Testing | Vitest (being added) |
-| Deployment | Local only for now |
+| Layer         | Choice                                            |
+| ------------- | ------------------------------------------------- |
+| Framework     | React 18.3.1                                      |
+| Language      | TypeScript                                        |
+| Build         | Vite 5.4.21                                       |
+| Styling       | Tailwind CSS 3.4.17                               |
+| Components    | shadcn/ui                                         |
+| Visualization | d3-sankey                                         |
+| Persistence   | URL query string, plus localStorage (being added) |
+| Testing       | Vitest (being added)                              |
+| Deployment    | Local only for now                                |
 
 Path alias `@/` maps to `./src/` — configured in both `tsconfig.app.json`
 (`paths`, no `baseUrl`) and `vite.config.ts` (`resolve.alias`).
@@ -51,6 +51,7 @@ is being added for the saved-budget library, but URL sharing is not being
 replaced.
 
 Key behaviors:
+
 - Write with `history.replaceState`, never `pushState` — otherwise every
   keystroke becomes a back-button entry
 - Debounce URL writes (~300ms) so typing doesn't thrash
@@ -92,11 +93,11 @@ A dependency audit remediation was completed before feature work began. The
 production dependency tree is clean (`npm audit --omit=dev` → 0
 vulnerabilities). Removed during that work:
 
-| Package | Why |
-|---|---|
-| `next-themes@0.2.1` | Transitively pulled in all of Next.js and sharp — source of a critical advisory. App has no dark mode; not replaced. |
-| `uuid` | Replaced with native `crypto.randomUUID()` |
-| `react-router-dom` / `react-router` | App is single-page. Patched version required React 19; router removed instead. `NotFound.tsx` deleted. |
+| Package                             | Why                                                                                                                  |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `next-themes@0.2.1`                 | Transitively pulled in all of Next.js and sharp — source of a critical advisory. App has no dark mode; not replaced. |
+| `uuid`                              | Replaced with native `crypto.randomUUID()`                                                                           |
+| `react-router-dom` / `react-router` | App is single-page. Patched version required React 19; router removed instead. `NotFound.tsx` deleted.               |
 
 `baseUrl` was removed from `tsconfig.app.json` (deprecated in TS 6, removed in
 TS 7). `paths` resolves relative to the tsconfig file without it.
@@ -111,13 +112,13 @@ single stale scaffold dependency.
 
 ## Known technical debt (deliberately deferred)
 
-| Item | Notes |
-|---|---|
-| ESLint 8.57.1 | End of life. Flat config migration to ESLint 9/10 is its own branch. |
-| Tailwind v3 | v4 would clear the `sucrase → glob → minimatch → brace-expansion` dev advisory chain. Config migration. |
-| `strict: false` | Scaffolded code likely won't survive `strict: true`. Any *new* file should be written strict-clean regardless. |
-| Bundle size | 484 kB single chunk. Not urgent. |
-| React 18 | Noted in case a dependency forces React 19 later. |
+| Item            | Notes                                                                                                          |
+| --------------- | -------------------------------------------------------------------------------------------------------------- |
+| ESLint 8.57.1   | End of life. Flat config migration to ESLint 9/10 is its own branch.                                           |
+| Tailwind v3     | v4 would clear the `sucrase → glob → minimatch → brace-expansion` dev advisory chain. Config migration.        |
+| `strict: false` | Scaffolded code likely won't survive `strict: true`. Any _new_ file should be written strict-clean regardless. |
+| Bundle size     | 484 kB single chunk. Not urgent.                                                                               |
+| React 18        | Noted in case a dependency forces React 19 later.                                                              |
 
 ---
 
@@ -163,6 +164,6 @@ Do not revisit these without asking:
 
 ## Companion documents
 
-- `docs/REQUIREMENTS.md` — numbered, testable acceptance criteria
-- `docs/IMPLEMENTATION-PLAN.md` — phased PR sequence
-- `docs/REQUIREMENTS-SESSION.md` — interview transcript and history
+- `docs/requirements/REQUIREMENTS.md` — numbered, testable acceptance criteria
+- `docs/requirements/IMPLEMENTATION-PLAN.md` — phased PR sequence
+- `docs/requirements/REQUIREMENTS-SESSION.md` — interview transcript and history
