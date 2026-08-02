@@ -10,10 +10,14 @@ import {
 
 import {
   decodeState,
+  describeLoadIssues,
   encodeState,
   getStateFromUrl,
+  hasIssues,
+  noIssues,
   updateUrlWithState,
 } from "@/utils/urlUtils";
+import type { BudgetLoadResult, LoadIssues } from "@/utils/urlUtils";
 import type { CashflowState } from "@/types/cashflow";
 import {
   SAMPLE_BUDGET,
@@ -21,13 +25,12 @@ import {
   VARIATION_SELECTOR_NAMES,
 } from "@/utils/urlUtils.fixtures";
 
-// CHARACTERIZATION TESTS.
+// Characterization tests, written in PR 0.2 against the behaviour of the day
+// and flipped in PR 0.2b as the two data-loss bugs were fixed.
 //
-// These describe URL serialization as it behaves TODAY, before Phase 1 changes
-// the schema. Several assertions below lock in behaviour that is arguably
-// wrong; each is marked QUIRK with a note. They are deliberately not fixed
-// here — the point of this PR is a safety net, and a net that describes the
-// code as we wish it were catches nothing.
+// Assertions still marked QUIRK describe behaviour that remains wrong on
+// purpose: quirks 4, 6 and 7 are deferred to PR 1.1, where the migration and
+// validation layers are built. See docs/requirements/IMPLEMENTATION-PLAN.md.
 
 /**
  * urlUtils reads window.location.href and calls window.history.replaceState.
@@ -43,7 +46,7 @@ const stubWindow = (href: string) => {
 /**
  * decodeState and encodeState both log to console.error when they reject
  * input. That is asserted once, below; everywhere else it is silenced so an
- * expected stack trace cannot bury a real failure.
+ * expected message cannot bury a real failure.
  */
 let consoleError: MockInstance<typeof console.error>;
 
@@ -56,16 +59,43 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const encodedOf = (state: CashflowState) => encodeURIComponent(JSON.stringify(state));
+/** Narrows to the loaded variant, failing with a useful message otherwise. */
+const expectLoaded = (result: BudgetLoadResult) => {
+  if (result.status !== "loaded") {
+    throw new Error(`expected a loaded budget, got "${result.status}"`);
+  }
+  return result;
+};
+
+const stateOf = (result: BudgetLoadResult): CashflowState =>
+  expectLoaded(result).state;
+
+const issuesOf = (result: BudgetLoadResult): LoadIssues =>
+  expectLoaded(result).issues;
+
+const decodeJson = (json: string) => decodeState(encodeURIComponent(json));
+
+const encodedOf = (state: CashflowState) =>
+  encodeURIComponent(JSON.stringify(state));
 
 describe("encodeState / decodeState round-trip", () => {
   it("round-trips a representative budget without loss", () => {
-    expect(decodeState(encodeState(SAMPLE_BUDGET))).toEqual(SAMPLE_BUDGET);
+    expect(stateOf(decodeState(encodeState(SAMPLE_BUDGET)))).toEqual(SAMPLE_BUDGET);
   });
 
   it("round-trips an empty budget", () => {
     const empty: CashflowState = { incomes: [], expenses: [] };
-    expect(decodeState(encodeState(empty))).toEqual(empty);
+    expect(stateOf(decodeState(encodeState(empty)))).toEqual(empty);
+  });
+
+  it("reports a clean budget as having no issues", () => {
+    expect(hasIssues(issuesOf(decodeState(encodeState(SAMPLE_BUDGET))))).toBe(false);
+  });
+
+  it("marks a budget arriving from a link as unsaved scratch", () => {
+    const loaded = expectLoaded(decodeState(encodeState(SAMPLE_BUDGET)));
+    expect(loaded.source).toBe("url");
+    expect(loaded.savedAs).toBeNull();
   });
 
   it("preserves amount precision, including decimals and zero", () => {
@@ -73,9 +103,9 @@ describe("encodeState / decodeState round-trip", () => {
       incomes: [{ id: "a", name: "Odd", amount: 1234.56 }],
       expenses: [{ id: "b", name: "Zero", amount: 0 }],
     };
-    const decoded = decodeState(encodeState(state));
-    expect(decoded?.incomes[0].amount).toBe(1234.56);
-    expect(decoded?.expenses[0].amount).toBe(0);
+    const decoded = stateOf(decodeState(encodeState(state)));
+    expect(decoded.incomes[0].amount).toBe(1234.56);
+    expect(decoded.expenses[0].amount).toBe(0);
   });
 
   it("preserves the optional color field when present", () => {
@@ -83,12 +113,12 @@ describe("encodeState / decodeState round-trip", () => {
       incomes: [{ id: "a", name: "Paid", amount: 1, color: "#ff0000" }],
       expenses: [],
     };
-    expect(decodeState(encodeState(state))?.incomes[0].color).toBe("#ff0000");
+    expect(stateOf(decodeState(encodeState(state))).incomes[0].color).toBe("#ff0000");
   });
 
   it("preserves item order", () => {
-    const decoded = decodeState(encodeState(SAMPLE_BUDGET));
-    expect(decoded?.expenses.map((e) => e.name)).toEqual(
+    const decoded = stateOf(decodeState(encodeState(SAMPLE_BUDGET)));
+    expect(decoded.expenses.map((e) => e.name)).toEqual(
       SAMPLE_BUDGET.expenses.map((e) => e.name),
     );
   });
@@ -100,7 +130,7 @@ describe("multi-codepoint emoji", () => {
       incomes: [],
       expenses: [{ id: "x", name, amount: 1 }],
     };
-    expect(decodeState(encodeState(state))?.expenses[0].name).toBe(name);
+    expect(stateOf(decodeState(encodeState(state))).expenses[0].name).toBe(name);
   });
 
   it("carries VARIATION SELECTOR-16 through the round-trip", () => {
@@ -110,13 +140,12 @@ describe("multi-codepoint emoji", () => {
     const name = "🏝️ Vacation";
     expect([...name].length).toBe(11);
     expect(name.length).toBe(12);
-    expect([...name][1]).toBe("️");
 
     const state: CashflowState = {
       incomes: [],
       expenses: [{ id: "x", name, amount: 4940 }],
     };
-    const decoded = decodeState(encodeState(state))?.expenses[0].name ?? "";
+    const decoded = stateOf(decodeState(encodeState(state))).expenses[0].name;
     expect([...decoded].length).toBe(11);
     expect(decoded.codePointAt(0)).toBe(0x1f3dd);
     expect(decoded.codePointAt(2)).toBe(0xfe0f);
@@ -134,22 +163,23 @@ describe("multi-codepoint emoji", () => {
 });
 
 describe("decodeState rejects malformed input", () => {
+  it("reports an absent payload as absent, not invalid", () => {
+    expect(decodeState("")).toEqual({ status: "absent" });
+  });
+
   it.each([
-    ["an empty string", ""],
     ["text that is not JSON", "not-json-at-all"],
     ["truncated JSON", encodeURIComponent('{"incomes":')],
     ["a malformed percent escape", "%E0%A4%A"],
-    ["a bare percent sign", "%"],
     ["JSON null", encodeURIComponent("null")],
-  ])("returns null for %s", (_label, input) => {
-    expect(decodeState(input)).toBeNull();
+  ])("reports %s as invalid", (_label, input) => {
+    expect(decodeState(input)).toEqual({ status: "invalid", reason: "unreadable" });
   });
 
   it("reports the failure through console.error", () => {
-    expect(decodeState("not-json-at-all")).toBeNull();
+    expect(decodeState("not-json-at-all").status).toBe("invalid");
     expect(consoleError).toHaveBeenCalledWith(
-      "Error decoding state:",
-      expect.any(SyntaxError),
+      "Error decoding state: the data parameter could not be read",
     );
   });
 
@@ -169,51 +199,165 @@ describe("decodeState rejects malformed input", () => {
 
 describe("decodeState coercion", () => {
   it("replaces a non-array incomes or expenses with an empty array", () => {
-    const decoded = decodeState(
-      encodeURIComponent('{"incomes":"nope","expenses":null}'),
-    );
-    expect(decoded).toEqual({ incomes: [], expenses: [] });
-  });
-
-  it("drops unrecognized top-level keys", () => {
-    const decoded = decodeState(
-      encodeURIComponent('{"incomes":[],"expenses":[],"expansionState":{"a":1}}'),
-    );
-    expect(decoded).toEqual({ incomes: [], expenses: [] });
-    expect(decoded).not.toHaveProperty("expansionState");
-  });
-
-  // QUIRK: a scalar JSON payload yields an empty-but-truthy state rather than
-  // null. Index.tsx only falls back to sample data when getStateFromUrl() is
-  // falsy, so ?data=123 renders a blank app instead of the sample budget.
-  it.each([
-    ["a number", "123"],
-    ["a string", '"hello"'],
-    ["a boolean", "true"],
-    ["an array", "[1,2,3]"],
-  ])("QUIRK: returns an empty state, not null, for %s", (_label, json) => {
-    expect(decodeState(encodeURIComponent(json))).toEqual({
+    expect(stateOf(decodeJson('{"incomes":"nope","expenses":null}'))).toEqual({
       incomes: [],
       expenses: [],
     });
   });
 
-  // QUIRK: validation stops at the top level. Items are passed through with no
-  // shape checking at all, so "never trust the URL" is only half-implemented.
-  it("QUIRK: passes items through without validating their shape", () => {
-    const decoded = decodeState(
-      encodeURIComponent('{"incomes":[{"junk":1}],"expenses":[]}'),
+  it("drops unrecognized top-level keys", () => {
+    const decoded = stateOf(
+      decodeJson('{"incomes":[],"expenses":[],"expansionState":{"a":1}}'),
     );
-    expect(decoded?.incomes).toEqual([{ junk: 1 }]);
+    expect(decoded).toEqual({ incomes: [], expenses: [] });
+    expect(decoded).not.toHaveProperty("expansionState");
   });
 
-  it("QUIRK: accepts a non-numeric amount", () => {
-    const decoded = decodeState(
-      encodeURIComponent(
-        '{"incomes":[{"id":"x","name":"n","amount":"NOT_A_NUMBER"}],"expenses":[]}',
-      ),
+  // QUIRK (Q4, deferred to PR 1.1): a scalar payload yields an empty-but-loaded
+  // state rather than a failure, so ?data=123 renders a blank app rather than
+  // falling back to the sample budget.
+  it.each([
+    ["a number", "123"],
+    ["a string", '"hello"'],
+    ["a boolean", "true"],
+    ["an array", "[1,2,3]"],
+  ])("QUIRK: returns an empty loaded state for %s", (_label, json) => {
+    expect(stateOf(decodeJson(json))).toEqual({ incomes: [], expenses: [] });
+  });
+});
+
+describe("item validation", () => {
+  it("drops an item with no usable amount and counts it", () => {
+    const result = decodeJson('{"incomes":[{"junk":1}],"expenses":[]}');
+    expect(stateOf(result).incomes).toEqual([]);
+    expect(issuesOf(result).droppedMalformed).toBe(1);
+  });
+
+  it.each([
+    ["a non-numeric string", '"NOT_A_NUMBER"'],
+    ["an empty string", '""'],
+    ["a thousands separator", '"1,200"'],
+    ["null", "null"],
+    ["an object", "{}"],
+  ])("drops an item whose amount is %s", (_label, amount) => {
+    const result = decodeJson(
+      `{"incomes":[{"id":"x","name":"n","amount":${amount}}],"expenses":[]}`,
     );
-    expect(decoded?.incomes[0].amount).toBe("NOT_A_NUMBER");
+    expect(stateOf(result).incomes).toEqual([]);
+    expect(issuesOf(result).droppedMalformed).toBe(1);
+  });
+
+  it("drops a non-object entry", () => {
+    const result = decodeJson('{"incomes":["nope",42,null],"expenses":[]}');
+    expect(stateOf(result).incomes).toEqual([]);
+    expect(issuesOf(result).droppedMalformed).toBe(3);
+  });
+
+  it("counts a negative amount separately from a malformed one", () => {
+    const result = decodeJson(
+      '{"incomes":[],"expenses":[{"id":"x","name":"Refund","amount":-450},{"id":"y","name":"Bad","amount":"nope"}]}',
+    );
+    expect(stateOf(result).expenses).toEqual([]);
+    expect(issuesOf(result)).toEqual({
+      repaired: 0,
+      droppedMalformed: 1,
+      droppedNegative: 1,
+    });
+  });
+
+  it("coerces a numeric string amount and counts it as repaired", () => {
+    const result = decodeJson(
+      '{"incomes":[{"id":"x","name":"Bonus","amount":"1500"}],"expenses":[]}',
+    );
+    expect(stateOf(result).incomes[0].amount).toBe(1500);
+    expect(issuesOf(result).repaired).toBe(1);
+  });
+
+  it("generates an id when one is missing, keeping the money", () => {
+    const result = decodeJson('{"incomes":[{"name":"Paycheck","amount":100}],"expenses":[]}');
+    const item = stateOf(result).incomes[0];
+
+    expect(item.amount).toBe(100);
+    expect(item.name).toBe("Paycheck");
+    expect(item.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-/i);
+    expect(issuesOf(result).repaired).toBe(1);
+  });
+
+  it("names an unnamed item rather than discarding its amount", () => {
+    const result = decodeJson('{"incomes":[{"id":"x","amount":250}],"expenses":[]}');
+    const item = stateOf(result).incomes[0];
+
+    expect(item.name).toBe("Untitled");
+    expect(item.amount).toBe(250);
+    expect(issuesOf(result).repaired).toBe(1);
+  });
+
+  it("counts an item repaired once even when several fields are fixed", () => {
+    const result = decodeJson('{"incomes":[{"amount":"75"}],"expenses":[]}');
+    expect(issuesOf(result).repaired).toBe(1);
+  });
+
+  it("strips a non-string color without counting it as a repair", () => {
+    const result = decodeJson(
+      '{"incomes":[{"id":"x","name":"n","amount":1,"color":42}],"expenses":[]}',
+    );
+    expect(stateOf(result).incomes[0]).not.toHaveProperty("color");
+    expect(issuesOf(result).repaired).toBe(0);
+  });
+
+  it("strips unknown per-item keys", () => {
+    const result = decodeJson(
+      '{"incomes":[{"id":"x","name":"n","amount":1,"evil":"<script>"}],"expenses":[]}',
+    );
+    expect(stateOf(result).incomes[0]).toEqual({ id: "x", name: "n", amount: 1 });
+  });
+
+  it("keeps the good items when only some are bad", () => {
+    const result = decodeJson(
+      '{"incomes":[{"id":"a","name":"Good","amount":100},{"junk":1},{"id":"c","name":"Neg","amount":-5}],"expenses":[]}',
+    );
+    expect(stateOf(result).incomes).toEqual([
+      { id: "a", name: "Good", amount: 100 },
+    ]);
+    expect(issuesOf(result)).toEqual({
+      repaired: 0,
+      droppedMalformed: 1,
+      droppedNegative: 1,
+    });
+  });
+
+  it("counts issues across both incomes and expenses", () => {
+    const result = decodeJson(
+      '{"incomes":[{"junk":1}],"expenses":[{"id":"x","name":"n","amount":-1}]}',
+    );
+    expect(issuesOf(result).droppedMalformed).toBe(1);
+    expect(issuesOf(result).droppedNegative).toBe(1);
+  });
+});
+
+describe("describeLoadIssues", () => {
+  it("returns null when nothing needed changing", () => {
+    expect(describeLoadIssues(noIssues())).toBeNull();
+  });
+
+  it("describes each category of issue", () => {
+    expect(
+      describeLoadIssues({ repaired: 2, droppedMalformed: 3, droppedNegative: 1 }),
+    ).toBe(
+      "3 items could not be read, 1 item had a negative amount, 2 items were repaired.",
+    );
+  });
+
+  it("uses singular wording for a single item", () => {
+    expect(
+      describeLoadIssues({ repaired: 1, droppedMalformed: 0, droppedNegative: 0 }),
+    ).toBe("1 item was repaired.");
+  });
+
+  it("mentions only the categories that occurred", () => {
+    expect(
+      describeLoadIssues({ repaired: 0, droppedMalformed: 0, droppedNegative: 2 }),
+    ).toBe("2 items had a negative amount.");
   });
 });
 
@@ -226,17 +370,18 @@ describe("encodeState failure", () => {
     expect(encodeState(circular)).toBe("");
   });
 
-  it("QUIRK: an empty encode result decodes to null, losing the budget", () => {
-    // encodeState returning "" is indistinguishable from "no data in the URL".
-    expect(decodeState("")).toBeNull();
+  // QUIRK (Q6, deferred to PR 1.1): an encode failure produces "", which the
+  // read path cannot distinguish from "no data in the URL".
+  it("QUIRK: an empty encode result reads back as absent, not as a failure", () => {
+    expect(decodeState("")).toEqual({ status: "absent" });
   });
 });
 
 describe("double encoding", () => {
-  it("QUIRK: the app writes TWO layers of encoding into the address bar", () => {
+  it("the app writes TWO layers of encoding into the address bar", () => {
     // encodeState percent-encodes, then URLSearchParams.set encodes the % signs
-    // again. CLAUDE.md describes this the other way round — as links arriving
-    // with %257B where the app wrote %7B. The app writes %257B itself.
+    // again. This is correct and load-bearing: every link ever shared was
+    // written this way. See the URL-as-database section of CLAUDE.md.
     const replaceState = stubWindow("https://cashkey.app/");
     updateUrlWithState(SAMPLE_BUDGET);
 
@@ -247,35 +392,45 @@ describe("double encoding", () => {
 
   it("reads back a URL the app wrote, double encoding and all", () => {
     stubWindow(SAMPLE_BUDGET_HREF);
-    expect(getStateFromUrl()).toEqual(SAMPLE_BUDGET);
+    expect(stateOf(getStateFromUrl())).toEqual(SAMPLE_BUDGET);
   });
 
   it("also reads a link that arrives with only one layer of encoding", () => {
-    // searchParams.get() performs one decode, decodeState performs another. A
-    // singly-encoded link survives only because the second decode is a no-op
-    // on a string containing no % signs.
     stubWindow(`https://cashkey.app/?data=${encodedOf(SAMPLE_BUDGET)}`);
-    expect(getStateFromUrl()).toEqual(SAMPLE_BUDGET);
+    expect(stateOf(getStateFromUrl())).toEqual(SAMPLE_BUDGET);
   });
 
-  // QUIRK: nothing detects or unwraps extra encoding layers. R-PER-1 requires
-  // it; today decodeState applies exactly one decodeURIComponent.
-  it("QUIRK: decodeState alone returns null for doubly-encoded input", () => {
+  it("unwraps a doubly-encoded payload", () => {
     const doubled = encodeURIComponent(encodeState(SAMPLE_BUDGET));
     expect(doubled.startsWith("%257B")).toBe(true);
-    expect(decodeState(doubled)).toBeNull();
+    expect(stateOf(decodeState(doubled))).toEqual(SAMPLE_BUDGET);
   });
 
-  it("QUIRK: a third encoding layer in the URL is not unwrapped", () => {
-    const tripled = encodeURIComponent(encodeState(SAMPLE_BUDGET));
-    stubWindow(`https://cashkey.app/?data=${encodeURIComponent(tripled)}`);
-    expect(getStateFromUrl()).toBeNull();
+  it("unwraps a third encoding layer picked up in transit", () => {
+    const doubled = encodeURIComponent(encodeState(SAMPLE_BUDGET));
+    stubWindow(`https://cashkey.app/?data=${encodeURIComponent(doubled)}`);
+    expect(stateOf(getStateFromUrl())).toEqual(SAMPLE_BUDGET);
   });
 
-  // QUIRK: the layer asymmetry has teeth. A literal % in a category name
-  // survives an app-written URL but destroys a singly-encoded one, and the
-  // user sees their budget silently replaced by sample data.
-  it("QUIRK: a % in a name survives two layers but not one", () => {
+  it("gives up rather than peeling forever", () => {
+    let over = encodeState(SAMPLE_BUDGET);
+    for (let i = 0; i < 5; i += 1) over = encodeURIComponent(over);
+    expect(decodeState(over)).toEqual({ status: "invalid", reason: "unreadable" });
+  });
+
+  it("does not decode a payload that is already plain JSON", () => {
+    // Decoding first would turn "100%20 off" into "100 off" with no error
+    // raised. Parsing first means an already-decoded payload is never touched.
+    const state: CashflowState = {
+      incomes: [{ id: "a", name: "100%20 off", amount: 1 }],
+      expenses: [],
+    };
+    expect(stateOf(decodeState(JSON.stringify(state))).incomes[0].name).toBe(
+      "100%20 off",
+    );
+  });
+
+  it("survives a % in a name at one layer or two", () => {
     const state: CashflowState = {
       incomes: [{ id: "a", name: "50% Rule", amount: 1 }],
       expenses: [],
@@ -287,33 +442,35 @@ describe("double encoding", () => {
     vi.unstubAllGlobals();
 
     stubWindow(written);
-    expect(getStateFromUrl()).toEqual(state);
+    expect(stateOf(getStateFromUrl())).toEqual(state);
     vi.unstubAllGlobals();
 
     stubWindow(`https://cashkey.app/?data=${encodedOf(state)}`);
-    expect(getStateFromUrl()).toBeNull();
+    expect(stateOf(getStateFromUrl())).toEqual(state);
   });
 });
 
 describe("getStateFromUrl", () => {
-  it("returns null when the URL carries no data parameter", () => {
+  it("reports absent when the URL carries no data parameter", () => {
     stubWindow("https://cashkey.app/");
-    expect(getStateFromUrl()).toBeNull();
+    expect(getStateFromUrl()).toEqual({ status: "absent" });
   });
 
-  it("returns null when data is present but empty", () => {
+  it("reports absent when data is present but empty", () => {
     stubWindow("https://cashkey.app/?data=");
-    expect(getStateFromUrl()).toBeNull();
+    expect(getStateFromUrl()).toEqual({ status: "absent" });
+  });
+
+  it("distinguishes a failed parse from an absent parameter", () => {
+    // The distinction Index.tsx depends on: an absent parameter seeds the
+    // sample budget, a failed parse must never do so.
+    stubWindow("https://cashkey.app/?data=%%%not-real%%%");
+    expect(getStateFromUrl()).toEqual({ status: "invalid", reason: "unreadable" });
   });
 
   it("ignores unrelated query parameters", () => {
     stubWindow(`${SAMPLE_BUDGET_HREF}&utm_source=newsletter`);
-    expect(getStateFromUrl()).toEqual(SAMPLE_BUDGET);
-  });
-
-  it("returns null rather than throwing on a garbage data parameter", () => {
-    stubWindow("https://cashkey.app/?data=%%%not-real%%%");
-    expect(getStateFromUrl()).toBeNull();
+    expect(stateOf(getStateFromUrl())).toEqual(SAMPLE_BUDGET);
   });
 });
 
@@ -336,7 +493,7 @@ describe("updateUrlWithState", () => {
     vi.unstubAllGlobals();
 
     stubWindow(written);
-    expect(getStateFromUrl()).toEqual(SAMPLE_BUDGET);
+    expect(stateOf(getStateFromUrl())).toEqual(SAMPLE_BUDGET);
   });
 
   it("preserves the path and other query parameters already on the URL", () => {
@@ -362,28 +519,29 @@ describe("the real-world share link", () => {
     expect(SAMPLE_BUDGET_HREF.length).toBeGreaterThan(2900);
   });
 
-  it("loads the full 16-item budget", () => {
+  it("loads the full 16-item budget with nothing repaired or dropped", () => {
     stubWindow(SAMPLE_BUDGET_HREF);
-    const decoded = getStateFromUrl();
+    const result = getStateFromUrl();
 
-    expect(decoded?.incomes).toHaveLength(5);
-    expect(decoded?.expenses).toHaveLength(11);
-    expect(decoded).toEqual(SAMPLE_BUDGET);
+    expect(stateOf(result).incomes).toHaveLength(5);
+    expect(stateOf(result).expenses).toHaveLength(11);
+    expect(stateOf(result)).toEqual(SAMPLE_BUDGET);
+    expect(hasIssues(issuesOf(result))).toBe(false);
   });
 
   it("preserves the figures the diagram depends on", () => {
     stubWindow(SAMPLE_BUDGET_HREF);
-    const decoded = getStateFromUrl();
+    const decoded = stateOf(getStateFromUrl());
 
     const total = (items: CashflowState["incomes"]) =>
       items.reduce((sum, item) => sum + item.amount, 0);
-    expect(total(decoded?.incomes ?? [])).toBe(60232);
-    expect(total(decoded?.expenses ?? [])).toBe(58981);
+    expect(total(decoded.incomes)).toBe(60232);
+    expect(total(decoded.expenses)).toBe(58981);
   });
 
   it("preserves emoji-bearing names exactly", () => {
     stubWindow(SAMPLE_BUDGET_HREF);
-    const names = getStateFromUrl()?.expenses.map((e) => e.name) ?? [];
+    const names = stateOf(getStateFromUrl()).expenses.map((e) => e.name);
 
     for (const name of VARIATION_SELECTOR_NAMES) {
       expect(names).toContain(name);

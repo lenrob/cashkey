@@ -2,7 +2,11 @@ import React, { useState, useEffect } from "react";
 import { CashflowItem, CashflowState } from "@/types/cashflow";
 import CashflowForm from "@/components/CashflowForm";
 import SankeyDiagram from "@/components/SankeyDiagram";
-import { getStateFromUrl, updateUrlWithState } from "@/utils/urlUtils";
+import {
+  describeLoadIssues,
+  getStateFromUrl,
+  updateUrlWithState,
+} from "@/utils/urlUtils";
 import { Button } from "@/components/ui/button";
 import { Share2, Info } from "lucide-react";
 import { toast } from "sonner";
@@ -70,41 +74,61 @@ const Index = () => {
     }
   }, []);
 
-  // Initialize with sample data if nothing from URL
+  // Initialize from the URL, or with sample data on a first visit.
   useEffect(() => {
-    const savedState = getStateFromUrl();
+    const result = getStateFromUrl();
 
-    if (savedState) {
-      setIncomes(savedState.incomes);
-      setExpenses(savedState.expenses);
-    } else {
-      // Sample data for first-time users with realistic U.S. median values
-      setIncomes([
-        { id: crypto.randomUUID(), name: "💵 Paycheck", amount: 54132 }, // Median U.S. annual salary
-        { id: crypto.randomUUID(), name: "💰 Side Gig", amount: 5000 }, // As specified
-        { id: crypto.randomUUID(), name: "🤑 Interest", amount: 500 }, // As specified
-        { id: crypto.randomUUID(), name: "📈 Dividends", amount: 500 }, // As specified
-        {
-          id: crypto.randomUUID(),
-          name: "💳 Credit Card Cashback",
-          amount: 100,
-        }, // As specified
-      ]);
+    if (result.status === "loaded") {
+      setIncomes(result.state.incomes);
+      setExpenses(result.state.expenses);
 
-      setExpenses([
-        { id: crypto.randomUUID(), name: "🏡 Housing", amount: 16608 }, // Median U.S. rent for 1-bedroom ($1,384/month)
-        { id: crypto.randomUUID(), name: "🍔 Food", amount: 8172 }, // Median U.S. food expense ($681/month)
-        { id: crypto.randomUUID(), name: "🏥 Healthcare", amount: 7610 }, // $6,468 Silver plan 1 person + $1,142 out of pocket annually
-        { id: crypto.randomUUID(), name: "🚙 Transportation", amount: 5676 }, // Median U.S. car lease payment ($473/month)
-        { id: crypto.randomUUID(), name: "🎓 Education", amount: 5000 },
-        { id: crypto.randomUUID(), name: "🏝️ Vacation", amount: 4940 },
-        { id: crypto.randomUUID(), name: "💡 Utilities", amount: 4475 },
-        { id: crypto.randomUUID(), name: "🛍️ Shopping", amount: 3000 },
-        { id: crypto.randomUUID(), name: "🎭 Entertainment", amount: 1500 },
-        { id: crypto.randomUUID(), name: "🎁 Gifts", amount: 1000 },
-        { id: crypto.randomUUID(), name: "🎗️ Charity", amount: 1000 },
-      ]);
+      const summary = describeLoadIssues(result.issues);
+      if (summary) {
+        toast.warning("Some items in this link needed attention", {
+          description: summary,
+        });
+      }
+      return;
     }
+
+    if (result.status === "invalid") {
+      // Never seed sample data over a link we failed to read. Doing so would
+      // silently replace someone's real budget with a demo, and the URL still
+      // holds their data — so leave it in the address bar for recovery.
+      toast.error("This link could not be read", {
+        description:
+          "Its data is damaged or incomplete. Nothing has been loaded, and your link has not been changed.",
+      });
+      return;
+    }
+
+    // status === "absent": no data parameter, so this is a first visit.
+    // Sample data for first-time users with realistic U.S. median values
+    setIncomes([
+      { id: crypto.randomUUID(), name: "💵 Paycheck", amount: 54132 }, // Median U.S. annual salary
+      { id: crypto.randomUUID(), name: "💰 Side Gig", amount: 5000 }, // As specified
+      { id: crypto.randomUUID(), name: "🤑 Interest", amount: 500 }, // As specified
+      { id: crypto.randomUUID(), name: "📈 Dividends", amount: 500 }, // As specified
+      {
+        id: crypto.randomUUID(),
+        name: "💳 Credit Card Cashback",
+        amount: 100,
+      }, // As specified
+    ]);
+
+    setExpenses([
+      { id: crypto.randomUUID(), name: "🏡 Housing", amount: 16608 }, // Median U.S. rent for 1-bedroom ($1,384/month)
+      { id: crypto.randomUUID(), name: "🍔 Food", amount: 8172 }, // Median U.S. food expense ($681/month)
+      { id: crypto.randomUUID(), name: "🏥 Healthcare", amount: 7610 }, // $6,468 Silver plan 1 person + $1,142 out of pocket annually
+      { id: crypto.randomUUID(), name: "🚙 Transportation", amount: 5676 }, // Median U.S. car lease payment ($473/month)
+      { id: crypto.randomUUID(), name: "🎓 Education", amount: 5000 },
+      { id: crypto.randomUUID(), name: "🏝️ Vacation", amount: 4940 },
+      { id: crypto.randomUUID(), name: "💡 Utilities", amount: 4475 },
+      { id: crypto.randomUUID(), name: "🛍️ Shopping", amount: 3000 },
+      { id: crypto.randomUUID(), name: "🎭 Entertainment", amount: 1500 },
+      { id: crypto.randomUUID(), name: "🎁 Gifts", amount: 1000 },
+      { id: crypto.randomUUID(), name: "🎗️ Charity", amount: 1000 },
+    ]);
   }, []);
 
   // Update URL whenever state changes
