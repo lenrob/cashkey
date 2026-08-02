@@ -144,7 +144,8 @@ vulnerabilities). Removed during that work:
 
 | Package                             | Why                                                                                                                  |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `next-themes@0.2.1`                 | Transitively pulled in all of Next.js and sharp — source of a critical advisory. App has no dark mode; not replaced. |
+| `next-themes`                       | Removed **twice**. The original removal (0.2.1) was for transitively pulling in all of Next.js and sharp — a critical advisory. It returned as 0.4.6 at some point between then and PR 0.2c, where it was removed again. Its only live consumer was `ui/sonner.tsx`, reading a theme the app never varies; `ThemeSwitcher.tsx` was dead code imported by nothing and was deleted with it. Dark mode remains a locked no. |
+| `sonner`                            | Removed in PR 0.2c. Its `Toaster` drops any toast published before it subscribes and never replays, so every toast fired from a mount effect vanished — including the app's own "Link copied" confirmation, broken long before anyone noticed. shadcn's `Toaster` initializes from module-level state and cannot lose that race. One toast system, one fewer dependency. |
 | `uuid` / `@types/uuid`              | Replaced with native `crypto.randomUUID()`. `@types/uuid` was left orphaned and removed later, in PR 0.0.            |
 | `react-router-dom` / `react-router` | App is single-page. Patched version required React 19; router removed instead. `NotFound.tsx` deleted.               |
 

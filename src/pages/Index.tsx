@@ -9,7 +9,7 @@ import {
 } from "@/utils/urlUtils";
 import { Button } from "@/components/ui/button";
 import { Share2, Info } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/hooks/use-toast";
 
 const title = "Cashkey";
 const tagline = "Visualize your cash flow";
@@ -84,7 +84,8 @@ const Index = () => {
 
       const summary = describeLoadIssues(result.issues);
       if (summary) {
-        toast.warning("Some items in this link needed attention", {
+        toast({
+          title: "Some items in this link needed attention",
           description: summary,
         });
       }
@@ -95,7 +96,9 @@ const Index = () => {
       // Never seed sample data over a link we failed to read. Doing so would
       // silently replace someone's real budget with a demo, and the URL still
       // holds their data — so leave it in the address bar for recovery.
-      toast.error("This link could not be read", {
+      toast({
+        variant: "destructive",
+        title: "This link could not be read",
         description:
           "Its data is damaged or incomplete. Nothing has been loaded, and your link has not been changed.",
       });
@@ -141,9 +144,9 @@ const Index = () => {
 
   const handleShare = () => {
     navigator.clipboard.writeText(window.location.href);
-    toast.success("Link copied to clipboard", {
+    toast({
+      title: "Link copied to clipboard",
       description: "Share this URL to show your cash flow diagram",
-      position: "top-center",
     });
   };
 
