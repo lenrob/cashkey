@@ -30,7 +30,7 @@ patch set intended for upstream.
 | Components    | shadcn/ui                                         |
 | Visualization | d3-sankey                                         |
 | Persistence   | URL query string, plus localStorage (being added) |
-| Testing       | Vitest (being added)                              |
+| Testing       | Vitest 3.2 — node environment, no DOM library     |
 | Deployment    | Local only for now                                |
 
 Path alias `@/` maps to `./src/` — configured in both `tsconfig.app.json`
@@ -66,6 +66,27 @@ There is no router. `react-router-dom` was removed deliberately (see history
 below). `App.tsx` renders `Index` directly. Do not reintroduce a router without
 discussion.
 
+### Testing
+
+Vitest, configured in `vite.config.ts` rather than a separate
+`vitest.config.ts` — one file means the `@/` alias cannot drift between the
+build and the test run.
+
+- Tests are colocated: `src/utils/urlUtils.test.ts` beside
+  `src/utils/urlUtils.ts`. `include` is `src/**/*.test.ts`
+- `environment: "node"`. **No jsdom, no happy-dom.** R-QA-1 covers pure logic
+  only, so nothing renders components. Node already provides `URL` and
+  `URLSearchParams`; the handful of functions touching `window.location` or
+  `window.history` get a `vi.stubGlobal` per test. Note that jsdom would not
+  help with the R-CMP-1 quota tests either — it does not enforce a
+  `localStorage` quota, so that failure mode needs a hand-written fake
+  regardless
+- `globals: false`. Import `describe`, `it`, `expect` from `vitest`
+  explicitly. This keeps `types: ["vitest/globals"]` out of
+  `tsconfig.app.json` and keeps the linter honest
+- Pinned to Vitest 3.2.x. Vitest 4 requires Vite 6 or later — see the
+  Vite 5 → 6 row under deferred debt
+
 ---
 
 ## Working conventions
@@ -75,10 +96,11 @@ These are non-negotiable and predate this document.
 - **Plan first.** Agree the approach before writing code. State the plan,
   get confirmation, then implement.
 - **Feature branches.** Work happens on branches off `main`. `main` stays green.
-- **Three gates.** Before any merge, all three must pass:
+- **Four gates.** Before any merge, all four must pass:
   ```
   npm run lint
   npm run build
+  npm run test
   npm run dev
   ```
 - **Concrete over prose.** Step-by-step instructions with exact commands and
