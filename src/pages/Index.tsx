@@ -96,6 +96,18 @@ const Index = () => {
       // Never seed sample data over a link we failed to read. Doing so would
       // silently replace someone's real budget with a demo, and the URL still
       // holds their data — so leave it in the address bar for recovery.
+      if (result.reason === "unsupported-version") {
+        // Distinct from the generic case: this link isn't broken, it was
+        // just made with a newer version of the app than this build knows.
+        toast({
+          variant: "destructive",
+          title: "This link needs a newer version of Cashkey",
+          description:
+            "Refresh the page or check for an update. Nothing has been loaded, and your link has not been changed.",
+        });
+        return;
+      }
+
       toast({
         variant: "destructive",
         title: "This link could not be read",

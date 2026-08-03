@@ -9,12 +9,14 @@ import {
 } from "vitest";
 
 import {
+  CURRENT_SCHEMA_VERSION,
   decodeState,
   describeLoadIssues,
   encodeState,
   getStateFromUrl,
   hasIssues,
   noIssues,
+  runMigrations,
   updateUrlWithState,
 } from "@/utils/urlUtils";
 import type { BudgetLoadResult, LoadIssues } from "@/utils/urlUtils";
@@ -26,12 +28,9 @@ import {
 } from "@/utils/urlUtils.fixtures";
 
 // Characterization tests, written in PR 0.2 against the behaviour of the day
-// and flipped in PR 0.2b as the two data-loss bugs were fixed.
-//
-// Assertions still marked QUIRK describe behaviour that remains wrong on
-// purpose: quirks 4, 6 and 7 are deferred to PR 1.1, where the migration
-// layer is built ahead of the validation layer already merged here. See
-// docs/requirements/IMPLEMENTATION-PLAN.md.
+// and flipped in PR 0.2b as the two data-loss bugs were fixed. PR 1.1 closes
+// the three defects deferred here (Q4, Q6, Q7) and adds the version envelope
+// and migration pipeline. See docs/requirements/IMPLEMENTATION-PLAN.md.
 
 /**
  * urlUtils reads window.location.href and calls window.history.replaceState.
@@ -79,22 +78,31 @@ const decodeJson = (json: string) => decodeState(encodeURIComponent(json));
 const encodedOf = (state: CashflowState) =>
   encodeURIComponent(JSON.stringify(state));
 
+/** encodeState only returns null for input that can't be JSON-serialized;
+ *  every fixture used positively in these tests can be, so narrow to string
+ *  here rather than repeating a null check at every call site. */
+const encodeOk = (state: CashflowState): string => {
+  const encoded = encodeState(state);
+  if (encoded === null) throw new Error("expected encodeState to succeed");
+  return encoded;
+};
+
 describe("encodeState / decodeState round-trip", () => {
   it("round-trips a representative budget without loss", () => {
-    expect(stateOf(decodeState(encodeState(SAMPLE_BUDGET)))).toEqual(SAMPLE_BUDGET);
+    expect(stateOf(decodeState(encodeOk(SAMPLE_BUDGET)))).toEqual(SAMPLE_BUDGET);
   });
 
   it("round-trips an empty budget", () => {
     const empty: CashflowState = { incomes: [], expenses: [] };
-    expect(stateOf(decodeState(encodeState(empty)))).toEqual(empty);
+    expect(stateOf(decodeState(encodeOk(empty)))).toEqual(empty);
   });
 
   it("reports a clean budget as having no issues", () => {
-    expect(hasIssues(issuesOf(decodeState(encodeState(SAMPLE_BUDGET))))).toBe(false);
+    expect(hasIssues(issuesOf(decodeState(encodeOk(SAMPLE_BUDGET))))).toBe(false);
   });
 
   it("marks a budget arriving from a link as unsaved scratch", () => {
-    const loaded = expectLoaded(decodeState(encodeState(SAMPLE_BUDGET)));
+    const loaded = expectLoaded(decodeState(encodeOk(SAMPLE_BUDGET)));
     expect(loaded.source).toBe("url");
     expect(loaded.savedAs).toBeNull();
   });
@@ -104,7 +112,7 @@ describe("encodeState / decodeState round-trip", () => {
       incomes: [{ id: "a", name: "Odd", amount: 1234.56 }],
       expenses: [{ id: "b", name: "Zero", amount: 0 }],
     };
-    const decoded = stateOf(decodeState(encodeState(state)));
+    const decoded = stateOf(decodeState(encodeOk(state)));
     expect(decoded.incomes[0].amount).toBe(1234.56);
     expect(decoded.expenses[0].amount).toBe(0);
   });
@@ -114,11 +122,11 @@ describe("encodeState / decodeState round-trip", () => {
       incomes: [{ id: "a", name: "Paid", amount: 1, color: "#ff0000" }],
       expenses: [],
     };
-    expect(stateOf(decodeState(encodeState(state))).incomes[0].color).toBe("#ff0000");
+    expect(stateOf(decodeState(encodeOk(state))).incomes[0].color).toBe("#ff0000");
   });
 
   it("preserves item order", () => {
-    const decoded = stateOf(decodeState(encodeState(SAMPLE_BUDGET)));
+    const decoded = stateOf(decodeState(encodeOk(SAMPLE_BUDGET)));
     expect(decoded.expenses.map((e) => e.name)).toEqual(
       SAMPLE_BUDGET.expenses.map((e) => e.name),
     );
@@ -131,7 +139,7 @@ describe("multi-codepoint emoji", () => {
       incomes: [],
       expenses: [{ id: "x", name, amount: 1 }],
     };
-    expect(stateOf(decodeState(encodeState(state))).expenses[0].name).toBe(name);
+    expect(stateOf(decodeState(encodeOk(state))).expenses[0].name).toBe(name);
   });
 
   it("carries VARIATION SELECTOR-16 through the round-trip", () => {
@@ -146,7 +154,7 @@ describe("multi-codepoint emoji", () => {
       incomes: [],
       expenses: [{ id: "x", name, amount: 4940 }],
     };
-    const decoded = stateOf(decodeState(encodeState(state))).expenses[0].name;
+    const decoded = stateOf(decodeState(encodeOk(state))).expenses[0].name;
     expect([...decoded].length).toBe(11);
     expect(decoded.codePointAt(0)).toBe(0x1f3dd);
     expect(decoded.codePointAt(2)).toBe(0xfe0f);
@@ -214,16 +222,15 @@ describe("decodeState coercion", () => {
     expect(decoded).not.toHaveProperty("expansionState");
   });
 
-  // QUIRK (Q4, deferred to PR 1.1): a scalar payload yields an empty-but-loaded
-  // state rather than a failure, so ?data=123 renders a blank app rather than
-  // falling back to the sample budget.
+  // Q4 (fixed in PR 1.1): a scalar or array payload is not a budget at all,
+  // so it must fail rather than decode to a blank-but-loaded state.
   it.each([
     ["a number", "123"],
     ["a string", '"hello"'],
     ["a boolean", "true"],
     ["an array", "[1,2,3]"],
-  ])("QUIRK: returns an empty loaded state for %s", (_label, json) => {
-    expect(stateOf(decodeJson(json))).toEqual({ incomes: [], expenses: [] });
+  ])("reports %s as not-a-budget, not an empty loaded state", (_label, json) => {
+    expect(decodeJson(json)).toEqual({ status: "invalid", reason: "not-a-budget" });
   });
 });
 
@@ -263,6 +270,7 @@ describe("item validation", () => {
       repaired: 0,
       droppedMalformed: 1,
       droppedNegative: 1,
+      migrated: 0,
     });
   });
 
@@ -324,6 +332,7 @@ describe("item validation", () => {
       repaired: 0,
       droppedMalformed: 1,
       droppedNegative: 1,
+      migrated: 0,
     });
   });
 
@@ -343,38 +352,73 @@ describe("describeLoadIssues", () => {
 
   it("describes each category of issue", () => {
     expect(
-      describeLoadIssues({ repaired: 2, droppedMalformed: 3, droppedNegative: 1 }),
+      describeLoadIssues({
+        repaired: 2,
+        droppedMalformed: 3,
+        droppedNegative: 1,
+        migrated: 4,
+      }),
     ).toBe(
-      "3 items could not be read, 1 item had a negative amount, 2 items were repaired.",
+      "3 items could not be read, 1 item had a negative amount, 2 items were repaired, 4 items updated from an older link format.",
     );
   });
 
   it("uses singular wording for a single item", () => {
     expect(
-      describeLoadIssues({ repaired: 1, droppedMalformed: 0, droppedNegative: 0 }),
+      describeLoadIssues({
+        repaired: 1,
+        droppedMalformed: 0,
+        droppedNegative: 0,
+        migrated: 0,
+      }),
     ).toBe("1 item was repaired.");
+  });
+
+  it("uses singular wording for a single migrated item", () => {
+    expect(
+      describeLoadIssues({
+        repaired: 0,
+        droppedMalformed: 0,
+        droppedNegative: 0,
+        migrated: 1,
+      }),
+    ).toBe("1 item updated from an older link format.");
   });
 
   it("mentions only the categories that occurred", () => {
     expect(
-      describeLoadIssues({ repaired: 0, droppedMalformed: 0, droppedNegative: 2 }),
+      describeLoadIssues({
+        repaired: 0,
+        droppedMalformed: 0,
+        droppedNegative: 2,
+        migrated: 0,
+      }),
     ).toBe("2 items had a negative amount.");
   });
 });
 
 describe("encodeState failure", () => {
-  it("returns an empty string when the state cannot be serialized", () => {
+  it("returns null (not an empty string) when the state cannot be serialized", () => {
     const circular = { incomes: [], expenses: [] } as CashflowState & {
       self?: unknown;
     };
     circular.self = circular;
-    expect(encodeState(circular)).toBe("");
+    expect(encodeState(circular)).toBeNull();
   });
 
-  // QUIRK (Q6, deferred to PR 1.1): an encode failure produces "", which the
-  // read path cannot distinguish from "no data in the URL".
-  it("QUIRK: an empty encode result reads back as absent, not as a failure", () => {
-    expect(decodeState("")).toEqual({ status: "absent" });
+  // Q6 (fixed in PR 1.1): an encode failure must not silently overwrite a
+  // good URL with an empty one, and must stay distinguishable from an
+  // absent parameter — updateUrlWithState now leaves the URL untouched.
+  it("leaves the URL unchanged when encoding fails, rather than writing an empty data param", () => {
+    const circular = { incomes: [], expenses: [] } as CashflowState & {
+      self?: unknown;
+    };
+    circular.self = circular;
+
+    const replaceState = stubWindow(SAMPLE_BUDGET_HREF);
+    updateUrlWithState(circular);
+
+    expect(replaceState).not.toHaveBeenCalled();
   });
 });
 
@@ -402,19 +446,19 @@ describe("double encoding", () => {
   });
 
   it("unwraps a doubly-encoded payload", () => {
-    const doubled = encodeURIComponent(encodeState(SAMPLE_BUDGET));
+    const doubled = encodeURIComponent(encodeOk(SAMPLE_BUDGET));
     expect(doubled.startsWith("%257B")).toBe(true);
     expect(stateOf(decodeState(doubled))).toEqual(SAMPLE_BUDGET);
   });
 
   it("unwraps a third encoding layer picked up in transit", () => {
-    const doubled = encodeURIComponent(encodeState(SAMPLE_BUDGET));
+    const doubled = encodeURIComponent(encodeOk(SAMPLE_BUDGET));
     stubWindow(`https://cashkey.app/?data=${encodeURIComponent(doubled)}`);
     expect(stateOf(getStateFromUrl())).toEqual(SAMPLE_BUDGET);
   });
 
   it("gives up rather than peeling forever", () => {
-    let over = encodeState(SAMPLE_BUDGET);
+    let over = encodeOk(SAMPLE_BUDGET);
     for (let i = 0; i < 5; i += 1) over = encodeURIComponent(over);
     expect(decodeState(over)).toEqual({ status: "invalid", reason: "unreadable" });
   });
@@ -548,5 +592,132 @@ describe("the real-world share link", () => {
       expect(names).toContain(name);
     }
     expect(names).toContain("🏡 Housing");
+  });
+});
+
+describe("schema version envelope", () => {
+  it("stamps the current schema version on every write", () => {
+    const json = decodeURIComponent(encodeOk(SAMPLE_BUDGET));
+    expect(JSON.parse(json).version).toBe(CURRENT_SCHEMA_VERSION);
+  });
+
+  it("round-trips the version through decodeState", () => {
+    expect(stateOf(decodeState(encodeOk(SAMPLE_BUDGET)))).toEqual(SAMPLE_BUDGET);
+  });
+
+  it("treats a payload with no version field as v1 and loads it cleanly", () => {
+    // The 2,971-character fixture predates the version field entirely — this
+    // is the permanent regression anchor every future migration must satisfy.
+    stubWindow(SAMPLE_BUDGET_HREF);
+    const result = getStateFromUrl();
+
+    expect(stateOf(result)).toEqual(SAMPLE_BUDGET);
+    expect(issuesOf(result).migrated).toBe(0);
+  });
+
+  it("rejects a version newer than this build knows how to migrate", () => {
+    const result = decodeJson('{"version":99,"incomes":[],"expenses":[]}');
+    expect(result).toEqual({ status: "invalid", reason: "unsupported-version" });
+  });
+
+  it("does not run validation on an unsupported version's payload", () => {
+    // A future shape could easily contain something that looks like today's
+    // incomes/expenses arrays but means something else. It must never reach
+    // validateItems.
+    const result = decodeJson(
+      '{"version":99,"incomes":[{"id":"x","name":"n","amount":1}],"expenses":[]}',
+    );
+    expect(result.status).toBe("invalid");
+  });
+
+  it("accepts a version equal to the current one", () => {
+    const result = decodeJson(
+      `{"version":${CURRENT_SCHEMA_VERSION},"incomes":[],"expenses":[]}`,
+    );
+    expect(result.status).toBe("loaded");
+  });
+});
+
+describe("runMigrations", () => {
+  // Synthetic migrations, independent of any real schema change, so the
+  // chaining mechanism is proven before PR 1.2/1.3 register real ones.
+  const isTagged = (item: unknown) =>
+    typeof item === "object" && item !== null && "tag" in item;
+
+  const addTag = (record: Record<string, unknown>, issues: LoadIssues) => {
+    const incomes = (Array.isArray(record.incomes) ? record.incomes : []).map(
+      (item) => {
+        if (isTagged(item)) return item;
+        issues.migrated += 1;
+        return { ...(item as object), tag: "v2" };
+      },
+    );
+    return { ...record, incomes };
+  };
+
+  const stampRecordLevel = (record: Record<string, unknown>, issues: LoadIssues) => {
+    issues.migrated += 1;
+    return { ...record, globalStamp: true };
+  };
+
+  it("returns the record unchanged when fromVersion equals toVersion", () => {
+    const record = { incomes: [], expenses: [] };
+    const issues = noIssues();
+    expect(runMigrations(record, 1, 1, { 1: addTag }, issues)).toBe(record);
+    expect(issues.migrated).toBe(0);
+  });
+
+  it("runs a per-item migration and counts only the items it changes", () => {
+    const record = {
+      incomes: [{ id: "a" }, { id: "b", tag: "already" }],
+      expenses: [],
+    };
+    const issues = noIssues();
+    const migrated = runMigrations(record, 1, 2, { 1: addTag }, issues);
+
+    expect((migrated.incomes as { tag?: string }[])[0].tag).toBe("v2");
+    expect((migrated.incomes as { tag?: string }[])[1].tag).toBe("already");
+    expect(issues.migrated).toBe(1);
+  });
+
+  it("chains a per-item migration into a record-level migration, v1→v2→v3", () => {
+    const record = { incomes: [{ id: "a" }], expenses: [] };
+    const issues = noIssues();
+    const migrated = runMigrations(
+      record,
+      1,
+      3,
+      { 1: addTag, 2: stampRecordLevel },
+      issues,
+    );
+
+    expect((migrated.incomes as { tag?: string }[])[0].tag).toBe("v2");
+    expect(migrated.globalStamp).toBe(true);
+    expect(issues.migrated).toBe(2);
+  });
+
+  it("skips a version with no registered migration", () => {
+    const record = { incomes: [], expenses: [] };
+    const issues = noIssues();
+    expect(runMigrations(record, 1, 3, { 2: stampRecordLevel }, issues)).toEqual({
+      ...record,
+      globalStamp: true,
+    });
+    expect(issues.migrated).toBe(1);
+  });
+});
+
+describe("migrated issue reporting", () => {
+  it("is reported separately from repaired", () => {
+    // With MIGRATIONS empty today, no production payload is old relative to
+    // CURRENT_SCHEMA_VERSION, so this exercises describeLoadIssues's wording
+    // directly rather than a real decodeState migration (see PR 1.2/1.3).
+    const summary = describeLoadIssues({
+      repaired: 1,
+      droppedMalformed: 0,
+      droppedNegative: 0,
+      migrated: 3,
+    });
+    expect(summary).toBe("1 item was repaired, 3 items updated from an older link format.");
   });
 });

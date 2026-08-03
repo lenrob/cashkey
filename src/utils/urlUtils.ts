@@ -3,10 +3,14 @@ import { CashflowItem, CashflowState } from '../types/cashflow';
 /**
  * Why a payload produced no usable budget.
  *
- * One member today. PR 1.1 adds "not-a-budget" when Q4 is fixed — a scalar
- * payload is currently treated as an empty budget rather than a failure.
+ * - 'unreadable': the payload could not be parsed at all, or is well-formed
+ *   but not shaped like a budget (Q4 — a bare scalar or array).
+ * - 'not-a-budget': parsed to something other than a record.
+ * - 'unsupported-version': parsed fine, but stamped with a schema version
+ *   newer than this build knows how to migrate. Distinct from 'unreadable'
+ *   because the link isn't broken — the user's app is behind.
  */
-export type LoadFailureReason = 'unreadable';
+export type LoadFailureReason = 'unreadable' | 'not-a-budget' | 'unsupported-version';
 
 /** Where a budget came from. "storage" lands in PR 2.1, "sample" in PR 2.3. */
 export type BudgetSource = 'url' | 'storage' | 'sample';
@@ -20,6 +24,11 @@ export interface LoadIssues {
    *  a negative expense is intent expressed wrongly, most likely a refund or
    *  a credit, and that signal is worth keeping distinct. */
   droppedNegative: number;
+  /** Items a version migration actually changed, brought forward from an
+   *  older schema. Distinct from `repaired`: a migrated item's data was fine
+   *  for its era, it just needed updating to the current shape. Reporting it
+   *  as repaired would tell the user their intact old link is damaged. */
+  migrated: number;
 }
 
 export type BudgetLoadResult =
@@ -38,18 +47,34 @@ export const noIssues = (): LoadIssues => ({
   repaired: 0,
   droppedMalformed: 0,
   droppedNegative: 0,
+  migrated: 0,
 });
 
 export const hasIssues = (issues: LoadIssues): boolean =>
-  issues.repaired > 0 || issues.droppedMalformed > 0 || issues.droppedNegative > 0;
+  issues.repaired > 0 ||
+  issues.droppedMalformed > 0 ||
+  issues.droppedNegative > 0 ||
+  issues.migrated > 0;
 
-// A simpler and more URL-friendly encoding scheme
-export const encodeState = (state: CashflowState): string => {
+/**
+ * The schema version this build writes and can read up to. Bumped whenever
+ * a PR changes the shape of a serialized item or record (PR 1.2 emoji, PR 1.3
+ * frequency, ...). A migration must be registered in MIGRATIONS for every
+ * version below this one.
+ */
+export const CURRENT_SCHEMA_VERSION = 1;
+
+// A simpler and more URL-friendly encoding scheme.
+// Returns null (not "") on failure, so a write failure stays distinguishable
+// from "no data in the URL" — see Q6 in the implementation plan.
+export const encodeState = (state: CashflowState): string | null => {
   try {
-    return encodeURIComponent(JSON.stringify(state));
+    return encodeURIComponent(
+      JSON.stringify({ version: CURRENT_SCHEMA_VERSION, ...state }),
+    );
   } catch (error) {
     console.error('Error encoding state:', error);
-    return '';
+    return null;
   }
 };
 
@@ -178,6 +203,54 @@ const validateItems = (raw: unknown, issues: LoadIssues): CashflowItem[] => {
   return items;
 };
 
+/**
+ * Brings a raw parsed record from the version it arrived as up to the shape
+ * this build expects. Runs before validation, on the raw record — migration's
+ * job is to recognize "old" and update it, not to judge whether current-shape
+ * data is usable (that's validateItem's job, unchanged).
+ *
+ * A migration may touch the whole record (a version whose backfill needs
+ * global state, e.g. PR 1.3's frequency inference) or map over a single raw
+ * item (e.g. PR 1.2's per-item emoji extraction) — this signature supports
+ * both, since either just returns a transformed record.
+ *
+ * Each migration receives `issues` and must increment `issues.migrated`
+ * itself, once per item it actually changes. Items already in the shape a
+ * migration produces must be left alone and not counted — otherwise a link
+ * where only 3 of 16 items needed updating would report all 16, which is the
+ * same noise that folding migrations into `repaired` would create.
+ */
+type Migration = (
+  record: Record<string, unknown>,
+  issues: LoadIssues,
+) => Record<string, unknown>;
+
+/**
+ * Keyed by the version a payload arrives as; migrates it one step forward.
+ * Empty today — PR 1.2 adds MIGRATIONS[1] when it bumps
+ * CURRENT_SCHEMA_VERSION to 2. Exported so tests can chain synthetic
+ * migrations without waiting for a real schema change to exist.
+ */
+const MIGRATIONS: Record<number, Migration> = {};
+
+export const runMigrations = (
+  record: Record<string, unknown>,
+  fromVersion: number,
+  toVersion: number,
+  migrations: Record<number, Migration>,
+  issues: LoadIssues,
+): Record<string, unknown> => {
+  let current = record;
+  for (let v = fromVersion; v < toVersion; v += 1) {
+    const step = migrations[v];
+    if (step) current = step(current, issues);
+  }
+  return current;
+};
+
+const readVersion = (record: Record<string, unknown>): number =>
+  typeof record.version === 'number' ? record.version : 1;
+
 export const decodeState = (
   encoded: string,
   source: BudgetSource = 'url',
@@ -187,15 +260,27 @@ export const decodeState = (
   const parsed = parseEncodedLayers(encoded);
 
   // JSON null threw on property access before this change, so it was a failure
-  // then and stays one now. Other scalars decoded to an empty budget and still
-  // do — that is Q4, deliberately left for PR 1.1 rather than smuggled in here.
+  // then and stays one now. Other scalars/arrays fail as 'not-a-budget' below.
   if (parsed === PARSE_FAILED || parsed === null) {
     console.error('Error decoding state: the data parameter could not be read');
     return { status: 'invalid', reason: 'unreadable' };
   }
 
-  const record = isRecord(parsed) ? parsed : {};
+  // Q4: a well-formed but non-record payload (?data=123, ?data=true,
+  // ?data=[1,2,3]) is not an empty budget, it's not a budget at all.
+  if (!isRecord(parsed)) {
+    console.error('Error decoding state: the data parameter is not a budget');
+    return { status: 'invalid', reason: 'not-a-budget' };
+  }
+
+  const version = readVersion(parsed);
+  if (version > CURRENT_SCHEMA_VERSION) {
+    console.error(`Error decoding state: unsupported schema version ${version}`);
+    return { status: 'invalid', reason: 'unsupported-version' };
+  }
+
   const issues = noIssues();
+  const record = runMigrations(parsed, version, CURRENT_SCHEMA_VERSION, MIGRATIONS, issues);
 
   return {
     status: 'loaded',
@@ -229,12 +314,20 @@ export const describeLoadIssues = (issues: LoadIssues): string | null => {
     const verb = issues.repaired === 1 ? 'was' : 'were';
     parts.push(`${countOf(issues.repaired)} ${verb} repaired`);
   }
+  if (issues.migrated > 0) {
+    parts.push(`${countOf(issues.migrated)} updated from an older link format`);
+  }
 
   return `${parts.join(', ')}.`;
 };
 
 export const updateUrlWithState = (state: CashflowState): void => {
   const encodedState = encodeState(state);
+  // Q6: a failed encode must not overwrite a good URL with an empty one, and
+  // must not be silently indistinguishable from "no data in the URL" either.
+  // Leaving the URL untouched is the safe default until this needs surfacing.
+  if (encodedState === null) return;
+
   const url = new URL(window.location.href);
   url.searchParams.set('data', encodedState);
   window.history.replaceState({}, '', url.toString());
