@@ -6,7 +6,8 @@ import { Plus, Trash2, DollarSign, Pencil, Check, X } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatCurrency } from '@/utils/cashflowUtils';
+import { formatCurrency, itemDisplayName } from '@/utils/cashflowUtils';
+import EmojiPicker from './EmojiPicker';
 import { 
   Select, 
   SelectContent, 
@@ -22,32 +23,36 @@ interface ExpenseSectionProps {
 
 const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpenses }) => {
   const [newExpenseName, setNewExpenseName] = useState('');
+  const [newExpenseEmoji, setNewExpenseEmoji] = useState('');
   const [newExpenseAmount, setNewExpenseAmount] = useState('');
   const [newExpensePeriod, setNewExpensePeriod] = useState('annual');
   const [editingExpense, setEditingExpense] = useState<CashflowItem | null>(null);
   const [editName, setEditName] = useState('');
+  const [editEmoji, setEditEmoji] = useState('');
   const [editAmount, setEditAmount] = useState('');
   const isMobile = useIsMobile();
 
   const handleAddExpense = () => {
     if (!newExpenseName || !newExpenseAmount) return;
-    
+
     let amount = parseInt(newExpenseAmount.replace(/[^0-9]/g, ''));
     if (isNaN(amount) || amount <= 0) return;
-    
+
     // Convert monthly amount to annual if needed
     if (newExpensePeriod === 'monthly') {
       amount = amount * 12;
     }
-    
+
     const newExpense: CashflowItem = {
       id: crypto.randomUUID(),
       name: newExpenseName,
       amount: amount,
+      ...(newExpenseEmoji ? { emoji: newExpenseEmoji } : {}),
     };
-    
+
     onUpdateExpenses([...expenses, newExpense]);
     setNewExpenseName('');
+    setNewExpenseEmoji('');
     setNewExpenseAmount('');
   };
 
@@ -58,6 +63,7 @@ const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpen
   const handleStartEdit = (expense: CashflowItem) => {
     setEditingExpense(expense);
     setEditName(expense.name);
+    setEditEmoji(expense.emoji ?? '');
     setEditAmount(expense.amount.toString());
   };
 
@@ -67,9 +73,9 @@ const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpen
     const amount = parseInt(editAmount.replace(/[^0-9]/g, ''));
     if (isNaN(amount) || amount <= 0) return;
 
-    onUpdateExpenses(expenses.map(expense => 
-      expense.id === editingExpense.id 
-        ? { ...expense, name: editName, amount: amount }
+    onUpdateExpenses(expenses.map(expense =>
+      expense.id === editingExpense.id
+        ? { ...expense, name: editName, amount: amount, emoji: editEmoji || undefined }
         : expense
     ));
     setEditingExpense(null);
@@ -113,16 +119,18 @@ const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpen
                 {editingExpense?.id === expense.id ? (
                   <>
                     <div className="flex-1 mr-4">
-                      <Input
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className={cn(
-                          "mb-2",
-                          isMobile && "text-sm"
-                        )}
-                        onKeyDown={handleKeyDown}
-                        onClick={(e) => e.stopPropagation()}
-                      />
+                      <div className="mb-2 flex gap-2" onClick={(e) => e.stopPropagation()}>
+                        <EmojiPicker value={editEmoji} onChange={setEditEmoji} />
+                        <Input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className={cn(
+                            "flex-1",
+                            isMobile && "text-sm"
+                          )}
+                          onKeyDown={handleKeyDown}
+                        />
+                      </div>
                       <div className="relative">
                         <DollarSign className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input
@@ -168,7 +176,7 @@ const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpen
                 ) : (
                   <>
               <div className="flex-1 mr-4">
-                <p className="font-medium">{expense.name}</p>
+                <p className="font-medium">{itemDisplayName(expense)}</p>
                 <p className="text-muted-foreground">{formatCurrency(expense.amount)}/year</p>
               </div>
               <Button 
@@ -191,6 +199,7 @@ const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpen
           {/* New expense input */}
           <div className="pt-2 space-y-3">
             <div className="flex gap-3">
+              <EmojiPicker value={newExpenseEmoji} onChange={setNewExpenseEmoji} />
               <Input
                 value={newExpenseName}
                 onChange={(e) => setNewExpenseName(e.target.value)}

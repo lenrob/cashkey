@@ -3,6 +3,7 @@ export interface CashflowItem {
   id: string;
   name: string;
   amount: number;
+  emoji?: string;
   color?: string;
 }
 

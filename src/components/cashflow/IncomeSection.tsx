@@ -6,7 +6,8 @@ import { Plus, Trash2, DollarSign, Check, X } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatCurrency } from '@/utils/cashflowUtils';
+import { formatCurrency, itemDisplayName } from '@/utils/cashflowUtils';
+import EmojiPicker from './EmojiPicker';
 import { 
   Select, 
   SelectContent, 
@@ -22,32 +23,36 @@ interface IncomeSectionProps {
 
 const IncomeSection: React.FC<IncomeSectionProps> = ({ incomes, onUpdateIncomes }) => {
   const [newIncomeName, setNewIncomeName] = useState('');
+  const [newIncomeEmoji, setNewIncomeEmoji] = useState('');
   const [newIncomeAmount, setNewIncomeAmount] = useState('');
   const [newIncomePeriod, setNewIncomePeriod] = useState('annual');
   const [editingIncome, setEditingIncome] = useState<CashflowItem | null>(null);
   const [editName, setEditName] = useState('');
+  const [editEmoji, setEditEmoji] = useState('');
   const [editAmount, setEditAmount] = useState('');
   const isMobile = useIsMobile();
 
   const handleAddIncome = () => {
     if (!newIncomeName || !newIncomeAmount) return;
-    
+
     let amount = parseInt(newIncomeAmount.replace(/[^0-9]/g, ''));
     if (isNaN(amount) || amount <= 0) return;
-    
+
     // Convert monthly amount to annual if needed
     if (newIncomePeriod === 'monthly') {
       amount = amount * 12;
     }
-    
+
     const newIncome: CashflowItem = {
       id: crypto.randomUUID(),
       name: newIncomeName,
       amount: amount,
+      ...(newIncomeEmoji ? { emoji: newIncomeEmoji } : {}),
     };
-    
+
     onUpdateIncomes([...incomes, newIncome]);
     setNewIncomeName('');
+    setNewIncomeEmoji('');
     setNewIncomeAmount('');
   };
 
@@ -58,6 +63,7 @@ const IncomeSection: React.FC<IncomeSectionProps> = ({ incomes, onUpdateIncomes 
   const handleStartEdit = (income: CashflowItem) => {
     setEditingIncome(income);
     setEditName(income.name);
+    setEditEmoji(income.emoji ?? '');
     setEditAmount(income.amount.toString());
   };
 
@@ -67,9 +73,9 @@ const IncomeSection: React.FC<IncomeSectionProps> = ({ incomes, onUpdateIncomes 
     const amount = parseInt(editAmount.replace(/[^0-9]/g, ''));
     if (isNaN(amount) || amount <= 0) return;
 
-    onUpdateIncomes(incomes.map(income => 
-      income.id === editingIncome.id 
-        ? { ...income, name: editName, amount: amount }
+    onUpdateIncomes(incomes.map(income =>
+      income.id === editingIncome.id
+        ? { ...income, name: editName, amount: amount, emoji: editEmoji || undefined }
         : income
     ));
     setEditingIncome(null);
@@ -113,16 +119,18 @@ const IncomeSection: React.FC<IncomeSectionProps> = ({ incomes, onUpdateIncomes 
                 {editingIncome?.id === income.id ? (
                   <>
                     <div className="flex-1 mr-4">
-                      <Input
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className={cn(
-                          "mb-2",
-                          isMobile && "text-sm"
-                        )}
-                        onKeyDown={handleKeyDown}
-                        onClick={(e) => e.stopPropagation()}
-                      />
+                      <div className="mb-2 flex gap-2" onClick={(e) => e.stopPropagation()}>
+                        <EmojiPicker value={editEmoji} onChange={setEditEmoji} />
+                        <Input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className={cn(
+                            "flex-1",
+                            isMobile && "text-sm"
+                          )}
+                          onKeyDown={handleKeyDown}
+                        />
+                      </div>
                       <div className="relative">
                         <DollarSign className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input
@@ -168,7 +176,7 @@ const IncomeSection: React.FC<IncomeSectionProps> = ({ incomes, onUpdateIncomes 
                 ) : (
                   <>
               <div className="flex-1 mr-4">
-                <p className="font-medium">{income.name}</p>
+                <p className="font-medium">{itemDisplayName(income)}</p>
                 <p className="text-muted-foreground">{formatCurrency(income.amount)}/year</p>
               </div>
               <Button 
@@ -191,6 +199,7 @@ const IncomeSection: React.FC<IncomeSectionProps> = ({ incomes, onUpdateIncomes 
           {/* New income input */}
           <div className="pt-2 space-y-3">
             <div className="flex gap-3">
+              <EmojiPicker value={newIncomeEmoji} onChange={setNewIncomeEmoji} />
               <Input
                 value={newIncomeName}
                 onChange={(e) => setNewIncomeName(e.target.value)}

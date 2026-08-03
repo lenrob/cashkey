@@ -1,4 +1,5 @@
 import { CashflowItem } from '../types/cashflow';
+import { itemDisplayName } from './cashflowUtils';
 
 // Softer, more neutral color palette with accent colors
 export const COLORS = {
@@ -39,9 +40,10 @@ export const processSankeyData = (incomes: CashflowItem[], expenses: CashflowIte
     // Income nodes (left side)
     ...sortedIncomes.map((income) => {
       const percentage = Math.round((income.amount / totalBudget) * 100);
+      const label = itemDisplayName(income);
       return {
-        name: income.name,
-        displayName: `${income.name}\n${percentage}%`,
+        name: label,
+        displayName: `${label}\n${percentage}%`,
         value: income.amount,
         percentage: percentage,
         itemId: income.id,
@@ -72,9 +74,10 @@ export const processSankeyData = (incomes: CashflowItem[], expenses: CashflowIte
     // Expense nodes (right side)
     ...sortedExpenses.map((expense) => {
       const percentage = Math.round((expense.amount / totalBudget) * 100);
+      const label = itemDisplayName(expense);
       return {
-        name: expense.name,
-        displayName: `${expense.name}\n${percentage}%`,
+        name: label,
+        displayName: `${label}\n${percentage}%`,
         value: expense.amount,
         percentage: percentage,
         itemId: expense.id,

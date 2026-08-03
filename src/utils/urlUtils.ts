@@ -62,7 +62,7 @@ export const hasIssues = (issues: LoadIssues): boolean =>
  * frequency, ...). A migration must be registered in MIGRATIONS for every
  * version below this one.
  */
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 // A simpler and more URL-friendly encoding scheme.
 // Returns null (not "") on failure, so a write failure stays distinguishable
@@ -189,6 +189,7 @@ const validateItem = (raw: unknown, issues: LoadIssues): CashflowItem | null => 
   const item: CashflowItem = { id, name, amount };
   // Cosmetic and optional: kept when usable, stripped without comment when not.
   if (typeof raw.color === 'string') item.color = raw.color;
+  if (typeof raw.emoji === 'string') item.emoji = raw.emoji;
   return item;
 };
 
@@ -226,12 +227,82 @@ type Migration = (
 ) => Record<string, unknown>;
 
 /**
- * Keyed by the version a payload arrives as; migrates it one step forward.
- * Empty today — PR 1.2 adds MIGRATIONS[1] when it bumps
- * CURRENT_SCHEMA_VERSION to 2. Exported so tests can chain synthetic
- * migrations without waiting for a real schema change to exist.
+ * Matches a leading run of one or more pictographic characters, each
+ * optionally followed by a variation selector (U+FE0F, as in the sample
+ * data's 🏝️/🛍️/🎗️) or an emoji modifier (skin tone). Deliberately does not
+ * match ZWJ (U+200D): a family emoji like 👨‍👩‍👧 is three pictographs joined
+ * by ZWJ, and this pattern stops at the first one, which is what makes the
+ * ambiguity check below reject it rather than split it in half.
  */
-const MIGRATIONS: Record<number, Migration> = {};
+const LEADING_EMOJI_RUN = new RegExp(
+  '^(?:\\p{Extended_Pictographic}(?:\\uFE0F|\\p{Emoji_Modifier})?)+',
+  'u',
+);
+
+/**
+ * Splits a leading emoji off a v1 `name`, or returns null when extraction
+ * would be a guess rather than a detection (R-DM-2: undetectable cases leave
+ * the whole string as the name).
+ *
+ * Two conditions must both hold:
+ * - the run is followed by whitespace, not run straight into more text
+ *   ("🏡Housing" has no separator — extracting there assumes a boundary
+ *   that isn't marked)
+ * - the remainder is non-empty after trimming that whitespace (an
+ *   emoji-only name like "🏡" would otherwise split into an empty name)
+ *
+ * A leading multi-emoji run ("🎉🎊 Party") is extracted as one unit — this is
+ * "the leading emoji", not "the leading single character". ZWJ sequences and
+ * regional-indicator flag pairs never reach the whitespace check: the regex
+ * doesn't cross a ZWJ, and a flag pair (two regional indicators, no gap) has
+ * no separator either, so both fall through to null here as well.
+ */
+const extractLeadingEmoji = (name: string): { emoji: string; name: string } | null => {
+  const match = LEADING_EMOJI_RUN.exec(name);
+  if (!match) return null;
+
+  const rest = name.slice(match[0].length);
+  if (!/^\s/.test(rest)) return null;
+
+  const trimmedRest = rest.replace(/^\s+/, '');
+  if (trimmedRest === '') return null;
+
+  return { emoji: match[0], name: trimmedRest };
+};
+
+/**
+ * v1 -> v2: emoji moves out of `name` into its own field (R-DM-2). Maps over
+ * both lists; an item is only rewritten, and only counted in
+ * issues.migrated, when a leading emoji was actually detected. An item with
+ * no emoji, or one that already carries an `emoji` key, passes through
+ * unchanged and uncounted.
+ */
+const migrateEmojiField: Migration = (record, issues) => {
+  const migrateItem = (raw: unknown): unknown => {
+    if (!isRecord(raw) || typeof raw.name !== 'string' || 'emoji' in raw) return raw;
+
+    const extracted = extractLeadingEmoji(raw.name);
+    if (!extracted) return raw;
+
+    issues.migrated += 1;
+    return { ...raw, name: extracted.name, emoji: extracted.emoji };
+  };
+
+  return {
+    ...record,
+    incomes: Array.isArray(record.incomes) ? record.incomes.map(migrateItem) : record.incomes,
+    expenses: Array.isArray(record.expenses) ? record.expenses.map(migrateItem) : record.expenses,
+  };
+};
+
+/**
+ * Keyed by the version a payload arrives as; migrates it one step forward.
+ * Exported so tests can chain synthetic migrations without waiting for a
+ * real schema change to exist.
+ */
+const MIGRATIONS: Record<number, Migration> = {
+  1: migrateEmojiField,
+};
 
 export const runMigrations = (
   record: Record<string, unknown>,

@@ -24,6 +24,7 @@ import type { CashflowState } from "@/types/cashflow";
 import {
   SAMPLE_BUDGET,
   SAMPLE_BUDGET_HREF,
+  SAMPLE_BUDGET_MIGRATED,
   VARIATION_SELECTOR_NAMES,
 } from "@/utils/urlUtils.fixtures";
 
@@ -168,6 +169,97 @@ describe("multi-codepoint emoji", () => {
         expenses: [{ id: "x", name: "🏝️", amount: 1 }],
       }),
     ).toContain("%EF%B8%8F");
+  });
+});
+
+describe("v1 -> v2 emoji migration", () => {
+  const migrate = (name: string) => {
+    const result = decodeJson(
+      `{"version":1,"incomes":[],"expenses":[{"id":"x","name":${JSON.stringify(name)},"amount":1}]}`,
+    );
+    const item = stateOf(result).expenses[0];
+    return { emoji: item.emoji, name: item.name, migrated: issuesOf(result).migrated };
+  };
+
+  it("leaves a name with no emoji unchanged and uncounted", () => {
+    expect(migrate("Housing")).toEqual({ emoji: undefined, name: "Housing", migrated: 0 });
+  });
+
+  it("extracts a leading emoji followed by a space", () => {
+    expect(migrate("🏡 Housing")).toEqual({ emoji: "🏡", name: "Housing", migrated: 1 });
+  });
+
+  it("does not extract an emoji that is not leading", () => {
+    expect(migrate("Housing 🏡")).toEqual({
+      emoji: undefined,
+      name: "Housing 🏡",
+      migrated: 0,
+    });
+  });
+
+  it.each(VARIATION_SELECTOR_NAMES)(
+    "splits a multi-codepoint emoji (%s) intact, selector included",
+    (combined) => {
+      const spaceIndex = combined.indexOf(" ");
+      const expectedEmoji = combined.slice(0, spaceIndex);
+      const expectedName = combined.slice(spaceIndex + 1);
+      expect(migrate(combined)).toEqual({
+        emoji: expectedEmoji,
+        name: expectedName,
+        migrated: 1,
+      });
+    },
+  );
+
+  it("extracts a leading multi-emoji run as one unit", () => {
+    expect(migrate("🎉🎊 Party")).toEqual({ emoji: "🎉🎊", name: "Party", migrated: 1 });
+  });
+
+  it("leaves an emoji-only name unchanged — splitting would produce an empty name", () => {
+    expect(migrate("🏡")).toEqual({ emoji: undefined, name: "🏡", migrated: 0 });
+  });
+
+  it("leaves a name with no separator after the emoji unchanged", () => {
+    expect(migrate("🏡Housing")).toEqual({
+      emoji: undefined,
+      name: "🏡Housing",
+      migrated: 0,
+    });
+  });
+
+  // Guardrails, not incidental passes: if the separator check above is ever
+  // loosened, these must keep failing for their own stated reason, not just
+  // happen to still pass.
+  it("does not split a ZWJ family emoji in half", () => {
+    // 👨‍👩‍👧 is U+1F468 ZWJ U+1F469 ZWJ U+1F467 — three pictographs joined by
+    // ZWJ (U+200D). The leading-run regex has no ZWJ branch, so it stops
+    // after the first pictograph; the character right after that isn't
+    // whitespace (it's U+200D), so the separator check rejects the split.
+    expect(migrate("👨‍👩‍👧 Family")).toEqual({
+      emoji: undefined,
+      name: "👨‍👩‍👧 Family",
+      migrated: 0,
+    });
+  });
+
+  it("does not split a regional-indicator flag pair", () => {
+    // 🇺🇸 is two Regional_Indicator codepoints, not Extended_Pictographic —
+    // the leading-run regex simply doesn't match them, so extraction never
+    // starts.
+    expect(migrate("🇺🇸 Trip")).toEqual({
+      emoji: undefined,
+      name: "🇺🇸 Trip",
+      migrated: 0,
+    });
+  });
+
+  it("leaves an item that already has an emoji field untouched and uncounted", () => {
+    const result = decodeJson(
+      '{"version":1,"incomes":[],"expenses":[{"id":"x","name":"Housing","emoji":"🏠","amount":1}]}',
+    );
+    const item = stateOf(result).expenses[0];
+    expect(item).toMatchObject({ name: "Housing", emoji: "🏠" });
+    expect(issuesOf(result).migrated).toBe(0);
   });
 });
 
@@ -437,12 +529,15 @@ describe("double encoding", () => {
 
   it("reads back a URL the app wrote, double encoding and all", () => {
     stubWindow(SAMPLE_BUDGET_HREF);
-    expect(stateOf(getStateFromUrl())).toEqual(SAMPLE_BUDGET);
+    expect(stateOf(getStateFromUrl())).toEqual(SAMPLE_BUDGET_MIGRATED);
   });
 
   it("also reads a link that arrives with only one layer of encoding", () => {
+    // encodedOf writes raw JSON with no version field (unlike encodeOk,
+    // which goes through encodeState and stamps one) — so, like the legacy
+    // href, this is read as v1 and migrated.
     stubWindow(`https://cashkey.app/?data=${encodedOf(SAMPLE_BUDGET)}`);
-    expect(stateOf(getStateFromUrl())).toEqual(SAMPLE_BUDGET);
+    expect(stateOf(getStateFromUrl())).toEqual(SAMPLE_BUDGET_MIGRATED);
   });
 
   it("unwraps a doubly-encoded payload", () => {
@@ -515,7 +610,7 @@ describe("getStateFromUrl", () => {
 
   it("ignores unrelated query parameters", () => {
     stubWindow(`${SAMPLE_BUDGET_HREF}&utm_source=newsletter`);
-    expect(stateOf(getStateFromUrl())).toEqual(SAMPLE_BUDGET);
+    expect(stateOf(getStateFromUrl())).toEqual(SAMPLE_BUDGET_MIGRATED);
   });
 });
 
@@ -570,8 +665,15 @@ describe("the real-world share link", () => {
 
     expect(stateOf(result).incomes).toHaveLength(5);
     expect(stateOf(result).expenses).toHaveLength(11);
-    expect(stateOf(result)).toEqual(SAMPLE_BUDGET);
-    expect(hasIssues(issuesOf(result))).toBe(false);
+    expect(stateOf(result)).toEqual(SAMPLE_BUDGET_MIGRATED);
+    // Every item's emoji was migrated out of its name, so migrated is the
+    // only nonzero issue count — nothing was repaired or dropped.
+    expect(issuesOf(result)).toEqual({
+      repaired: 0,
+      droppedMalformed: 0,
+      droppedNegative: 0,
+      migrated: 16,
+    });
   });
 
   it("preserves the figures the diagram depends on", () => {
@@ -584,14 +686,23 @@ describe("the real-world share link", () => {
     expect(total(decoded.expenses)).toBe(58981);
   });
 
-  it("preserves emoji-bearing names exactly", () => {
+  it("splits multi-codepoint emoji into the emoji field intact, not the name", () => {
     stubWindow(SAMPLE_BUDGET_HREF);
-    const names = stateOf(getStateFromUrl()).expenses.map((e) => e.name);
+    const expenses = stateOf(getStateFromUrl()).expenses;
 
-    for (const name of VARIATION_SELECTOR_NAMES) {
-      expect(names).toContain(name);
+    // VARIATION_SELECTOR_NAMES is "<emoji> <name>"; the migration should
+    // land the emoji (selector and all) in `emoji`, and the bare word in
+    // `name` — never a name that still starts with the emoji.
+    for (const combined of VARIATION_SELECTOR_NAMES) {
+      const spaceIndex = combined.indexOf(" ");
+      const emoji = combined.slice(0, spaceIndex);
+      const name = combined.slice(spaceIndex + 1);
+      const item = expenses.find((e) => e.name === name);
+      expect(item?.emoji).toBe(emoji);
     }
-    expect(names).toContain("🏡 Housing");
+
+    const housing = expenses.find((e) => e.name === "Housing");
+    expect(housing?.emoji).toBe("🏡");
   });
 });
 
@@ -605,14 +716,16 @@ describe("schema version envelope", () => {
     expect(stateOf(decodeState(encodeOk(SAMPLE_BUDGET)))).toEqual(SAMPLE_BUDGET);
   });
 
-  it("treats a payload with no version field as v1 and loads it cleanly", () => {
+  it("treats a payload with no version field as v1 and migrates it forward", () => {
     // The 2,971-character fixture predates the version field entirely — this
     // is the permanent regression anchor every future migration must satisfy.
+    // Since PR 1.2, "loads cleanly" means "migrates cleanly": every item's
+    // emoji is detectable, so all 16 are migrated rather than left alone.
     stubWindow(SAMPLE_BUDGET_HREF);
     const result = getStateFromUrl();
 
-    expect(stateOf(result)).toEqual(SAMPLE_BUDGET);
-    expect(issuesOf(result).migrated).toBe(0);
+    expect(stateOf(result)).toEqual(SAMPLE_BUDGET_MIGRATED);
+    expect(issuesOf(result).migrated).toBe(16);
   });
 
   it("rejects a version newer than this build knows how to migrate", () => {
