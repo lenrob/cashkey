@@ -130,6 +130,9 @@ These are non-negotiable and predate this document.
   npm run test
   npm run dev
   ```
+- **Committing is part of the work, not a separate approval step.** When all
+  four gates pass, `git add -A` (including untracked files) and commit
+  without waiting for confirmation. Report the hash.
 - **Concrete over prose.** Step-by-step instructions with exact commands and
   exact file edits. Not explanatory essays.
 - **One concern per PR.** Do not bundle unrelated changes.
