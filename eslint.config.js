@@ -27,23 +27,32 @@ export default tseslint.config(
     },
   },
   {
-    // shadcn/ui files are generated scaffold, re-pulled from upstream rather
-    // than hand-maintained. Scaffold-shaped complaints here are not actionable.
-    files: ["src/components/ui/**/*.{ts,tsx}"],
+    // Empty interface is structurally equivalent to its extended supertype;
+    // shadcn scaffold shape, not worth hand-editing for one lint rule.
+    files: ["src/components/ui/textarea.tsx"],
     rules: {
       "@typescript-eslint/no-empty-object-type": "off",
+    },
+  },
+  {
+    // These files export a non-component constant/helper alongside their
+    // component(s), which breaks React Fast Refresh's file-shape assumption.
+    // shadcn scaffold shape, not worth splitting into extra files.
+    files: [
+      "src/components/ui/badge.tsx",
+      "src/components/ui/button.tsx",
+      "src/components/ui/form.tsx",
+    ],
+    rules: {
       "react-refresh/only-export-components": "off",
     },
   },
   {
     // d3-sankey mutates the graph it is given and hands back layout objects
-    // its own types do not describe. Quarantined to these three files so that
+    // its own types do not describe. Quarantined to this file so that
     // no-explicit-any stays an error everywhere else — including the Phase 1
     // data-model work, which is exactly where an `any` would do real damage.
-    files: [
-      "src/components/SankeyDiagram.tsx",
-      "src/components/sankey/**/*.{ts,tsx}",
-    ],
+    files: ["src/components/SankeyDiagram.tsx"],
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
     },

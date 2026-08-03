@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
-import { sankey } from 'd3-sankey';
+import { sankey, SankeyNodeMinimal } from 'd3-sankey';
 import { CashflowItem } from '../types/cashflow';
 import { processSankeyData } from '../utils/sankeyUtils';
 import { cn } from '@/lib/utils';
@@ -69,19 +69,23 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({ incomes, expenses, classN
     });
 
     // Center the budget node vertically
-    const budgetNode = sankeyData.nodes.find((n: any) => n.name === 'Budget');
+    type PositionedNode = SankeyNodeMinimal<object, object> & { name: string };
+    const budgetNode = (sankeyData.nodes as PositionedNode[]).find(n => n.name === 'Budget');
     if (budgetNode) {
-      const centerY = innerHeight / 2;
-      const nodeHeight = budgetNode.y1 - budgetNode.y0;
-      budgetNode.y0 = centerY - (nodeHeight / 2);
-      budgetNode.y1 = centerY + (nodeHeight / 2);
-      
-      // Additional adjustments for desktop view
-      if (!isMobile) {
-        const minHeight = innerHeight * 0.5;
-        if (budgetNode.y1 - budgetNode.y0 < minHeight) {
-          budgetNode.y0 = centerY - (minHeight / 2);
-          budgetNode.y1 = centerY + (minHeight / 2);
+      const { y0, y1 } = budgetNode;
+      if (typeof y0 === 'number' && typeof y1 === 'number') {
+        const centerY = innerHeight / 2;
+        const nodeHeight = y1 - y0;
+        budgetNode.y0 = centerY - (nodeHeight / 2);
+        budgetNode.y1 = centerY + (nodeHeight / 2);
+
+        // Additional adjustments for desktop view
+        if (!isMobile) {
+          const minHeight = innerHeight * 0.5;
+          if (budgetNode.y1 - budgetNode.y0 < minHeight) {
+            budgetNode.y0 = centerY - (minHeight / 2);
+            budgetNode.y1 = centerY + (minHeight / 2);
+          }
         }
       }
     }
