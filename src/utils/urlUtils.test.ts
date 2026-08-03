@@ -29,8 +29,9 @@ import {
 // and flipped in PR 0.2b as the two data-loss bugs were fixed.
 //
 // Assertions still marked QUIRK describe behaviour that remains wrong on
-// purpose: quirks 4, 6 and 7 are deferred to PR 1.1, where the migration and
-// validation layers are built. See docs/requirements/IMPLEMENTATION-PLAN.md.
+// purpose: quirks 4, 6 and 7 are deferred to PR 1.1, where the migration
+// layer is built ahead of the validation layer already merged here. See
+// docs/requirements/IMPLEMENTATION-PLAN.md.
 
 /**
  * urlUtils reads window.location.href and calls window.history.replaceState.

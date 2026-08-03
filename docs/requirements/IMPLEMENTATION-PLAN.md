@@ -23,57 +23,130 @@ lands on a stable base.
 
 ---
 
-## Phase 0 — Foundation
+## Phase 0 — Foundation (complete)
 
-Test infrastructure has to exist before the migration work, because migration
-correctness is exactly what needs proving.
+**Status: merged (PRs 0.0–0.3).** This section now describes what was
+actually built, not what was planned — the original PR 0.2 scope
+("characterize existing behavior") undersold the result, and PR 1.1 below is
+scoped against the real thing, not the original description.
 
 ### PR 0.1 — Vitest setup
 **Requirements:** R-QA-1 (infrastructure only)
 
-- Add Vitest and configure for the Vite project
-- Add `npm run test` and `npm run test:watch`
-- One trivial passing test to prove the harness
-- **Extend the three gates to four:** lint, build, test, dev
+- Vitest configured in `vite.config.ts` (not a separate config file), node
+  environment, `globals: false`
+- `npm run test` and `npm run test:watch`
+- **Extended the three gates to four:** lint, build, test, dev
 
-### PR 0.2 — Characterize existing behavior
+### PR 0.2 — URL decode/validation pipeline
 **Requirements:** R-QA-1, R-PER-1
 
-Write tests against the URL serialization **as it works today**, before
-changing it. These are the safety net for every subsequent migration.
+Went well beyond characterization. The read path was rewritten, not just
+tested, and the result is the foundation PR 1.1 builds on:
 
-- Round-trip serialize/deserialize of a representative budget
-- Malformed input rejected without crashing
-- Double-encoded input (`%257B`) detected and unwrapped
-- The long real-world URL from the requirements session as a fixture
+- `getStateFromUrl` / `decodeState` return a `BudgetLoadResult` discriminated
+  union (`src/utils/urlUtils.ts`): `{status:'absent'}`,
+  `{status:'invalid', reason: LoadFailureReason}`, or `{status:'loaded', state,
+  source, savedAs, issues}`. `LoadFailureReason` is a union of one member
+  today (`'unreadable'`) — deliberately left open for PR 1.1 to extend
+- `BudgetSource` (`'url' | 'storage' | 'sample'`) and `savedAs` are already
+  modeled on the type even though `'storage'` has no producer until PR 2.1 and
+  `savedAs` is always `null` until then
+- Multi-layer percent-encoding is unwrapped by parsing first and only
+  decoding on failure (`parseEncodedLayers`), up to `MAX_ENCODING_LAYERS`,
+  rather than assuming a fixed number of layers
+- **Item-level validation exists and ships today**, independent of any
+  schema version: `validateItem`/`validateItems` coerce what's unambiguous
+  (numeric strings, missing id/name), drop what can't be drawn (no usable
+  amount), and drop negative amounts as a distinct case — all counted in a
+  `LoadIssues` struct (`repaired`, `droppedMalformed`, `droppedNegative`) and
+  surfaced to the user via `describeLoadIssues` and a toast in `Index.tsx`
+- 69 tests, including the 2,971-character real-world share link as a fixture
+  (`src/utils/urlUtils.fixtures.ts`) — this fixture has no version field and
+  is therefore also the permanent v1/no-version regression case for PR 1.1
+- Three defects were found and intentionally left unfixed pending PR 1.1
+  (Q4, Q6, Q7 — see PR 1.1 below)
+
+**What this means for PR 1.1:** the validation layer is not future work, it's
+merged. PR 1.1 is not "build the mechanism for judging whether a payload is
+usable" — that exists. Its job is to (a) add a version envelope and a
+migration step that runs *before* that existing validation, and (b) close
+the three deferred defects.
 
 ---
 
 ## Phase 1 — Data model
 
-### PR 1.1 — Schema versioning
+### PR 1.1 — Schema versioning and migration pipeline
 **Requirements:** R-DM-1, R-DM-2 (migration support)
 
-Before changing the shape, add the mechanism for changing the shape.
+The validation layer (item-level coercion, drop-and-count, `BudgetLoadResult`)
+already exists — see Phase 0 above. PR 1.1 does **not** rebuild that. Its job
+is to insert a migration step ahead of it, so PR 1.2 and 1.3 have a pipeline to
+plug into, and to close the three defects carried over from PR 0.2.
 
-- Introduce a version field in the serialized payload
-- Payloads with no version are treated as v1 (legacy)
-- A migration pipeline runs on load, upgrading old payloads in memory
-- Tests: a v1 payload loads correctly through the pipeline
+**Pipeline shape (decision, locked in):**
+
+- **Migration runs before validation, on the raw parsed record** — not
+  after, not interleaved. Rationale: migration's job is to get an old payload
+  into current shape; validation's job is to judge whether current-shape data
+  is usable. A v1 item with no `frequency` field is *old*, not malformed, and
+  `validateItem` must not have to tell the difference. Concretely, in
+  `decodeState`: `parse → migrate(record) → validateItems(migrated.incomes,
+  ...)`, replacing the current direct `parse → validateItems(record.incomes,
+  ...)`
+- A migration step may read and transform **the whole record** (PR 1.3's
+  frequency inference needs the record's global mode to backfill each item)
+  or **a single raw item** (PR 1.2's per-item emoji extraction). The pipeline
+  must support both shapes — e.g. a per-version migration function
+  `(record) => record` that internally maps over `record.incomes` /
+  `record.expenses` as needed, chained v1→v2→v3→...→current
+- **`version` lives top-level on the serialized envelope, not per-item.**
+  `encodeState` is changed to stamp the current schema version on every
+  write (it currently writes no version at all). `decodeState` treats a
+  missing `version` as v1 (legacy — every link ever shared)
+- **Unknown/future version is an explicit failure, not a silent misread.**
+  A `version` newer than the pipeline knows how to migrate must return
+  `{status: 'invalid', reason: 'unreadable'}` rather than being run through
+  validation as-is (which could misinterpret a shape it's never seen). This
+  is new handling — nothing in Phase 0 covers it, since no version field
+  exists yet
+- **Migrated items get their own counter, separate from `repaired`.** Add
+  `migrated: number` to `LoadIssues` alongside `repaired`,
+  `droppedMalformed`, `droppedNegative`. Update `hasIssues` and
+  `describeLoadIssues` to include it, with its own sentence (e.g. "N items
+  were updated from an older link format"). Rationale: `repaired` means
+  "your data was wrong and I fixed it"; `migrated` means "your data was fine
+  for its era and I brought it forward." Reporting a migrated item as
+  repaired would tell a user their intact old link is damaged, which is false
+
+**Tests** (replaces the old "v1 payload loads correctly" bullet — that case
+is already covered by the 69 existing tests and the no-version fixture):
+
+- `encodeState` stamps the current version; round-trip through `decodeState`
+  preserves it
+- A payload with no `version` field is treated as v1 and migrates cleanly
+  (the existing 2,971-character fixture is the anchor for this — it has no
+  version field and must keep loading through every future migration)
+- A payload with a `version` newer than current returns `{status: 'invalid'}`
+  rather than being validated as-is
+- A migration that touches per-item shape vs. one that touches record-level
+  shape can both run in the same pipeline
+- `migrated` count is reported separately from `repaired` in
+  `describeLoadIssues`, with distinct wording
 
 **Note:** this is the single most important PR in the plan. Every legacy
 `?data=` link Lenny has ever bookmarked or shared depends on it.
 
 **Carried over from PR 0.2.** Characterizing the current decode path surfaced
 seven defects. Two data-loss bugs and the multi-layer unwrapping were fixed in
-PR 0.2b. The three below were deferred to here, where the validation layer is
-being built anyway, and must not be lost:
+PR 0.2b. The three below were deferred to here and must not be lost:
 
-| # | Defect | Why it matters |
+| # | Defect | Fix (decision, locked in) |
 |---|---|---|
-| Q4 | A scalar JSON payload — `?data=123`, `?data=true` — decodes to an empty **but truthy** state rather than a failure. `Index.tsx` only seeds sample data when the result is falsy, so the app renders blank | One line to fix once the result type from PR 0.2b is in place. Locked in by an existing characterization test that must be flipped |
-| Q6 | `encodeState` returns `""` when serialization fails, which `decodeState` reads as "no data in the URL" | A write failure is indistinguishable from an empty URL — the same conflation PR 0.2b removed from the read path |
-| Q7 | Decode failures report to `console.error` only | No user-visible signal. PR 0.2b added a toast for invalid links and dropped items; extend it to cover migration failures |
+| Q4 | A scalar JSON payload — `?data=123`, `?data=true` — decodes to an empty **but truthy** state rather than a failure. `Index.tsx` only seeds sample data when the result is falsy, so the app renders blank | Add `'not-a-budget'` to `LoadFailureReason`. In `decodeState`, when the parsed value is non-null but not a record (`isRecord` false), return `{status: 'invalid', reason: 'not-a-budget'}` instead of falling through to `record = {}` and a `'loaded'` empty state |
+| Q6 | `encodeState` returns `""` when serialization fails, which `decodeState` reads as "no data in the URL" | A write failure must stay distinguishable from an empty URL — the same conflation PR 0.2b removed from the read path |
+| Q7 | Decode failures report to `console.error` only | `Index.tsx` already toasts on `status === 'invalid'` (added in PR 0.2c) — extend the same toast path to cover migration failures (unknown-version and per-item migration errors), not just unreadable payloads |
 
 ### PR 1.2 — Emoji as separate field
 **Requirements:** R-DM-2
