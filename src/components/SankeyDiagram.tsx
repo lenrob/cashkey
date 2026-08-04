@@ -382,36 +382,7 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({
         });
     }
 
-    // Expand/collapse badge — only on expense nodes with children (R-DM-4).
-    // A filled circle immediately to the right of the node it controls, so
-    // it reads as attached to that node rather than floating in the label
-    // gap, plus a hover cursor on the whole badge group as the interactivity
-    // cue.
     const positionedNodes = sankeyData.nodes as PositionedSankeyNode[];
-    const badgeGroups = nodeGroups
-      .filter((d: any) => !!expenseById.get(d.itemId)?.children?.length)
-      .append('g')
-      .attr('class', 'expand-badge')
-      .style('cursor', 'pointer')
-      .on('click', (_event, d: any) => onToggleExpand(d.itemId));
-
-    badgeGroups
-      .append('circle')
-      .attr('cx', (d: any) => d.x1 + badgeGapFromNode + badgeRadius)
-      .attr('cy', (d: any) => d.y0 + (d.y1 - d.y0) / 2)
-      .attr('r', badgeRadius)
-      .attr('fill', '#4b5563')
-      .attr('fill-opacity', 0.9);
-
-    badgeGroups
-      .append('text')
-      .attr('x', (d: any) => d.x1 + badgeGapFromNode + badgeRadius)
-      .attr('y', (d: any) => d.y0 + (d.y1 - d.y0) / 2)
-      .attr('dy', '0.35em')
-      .attr('text-anchor', 'middle')
-      .style('font-size', isMobile ? '8px' : '10px')
-      .style('fill', 'white')
-      .text((d: any) => (expandedIds.has(d.itemId) ? '−' : '+'));
 
     // Fourth column: one manually laid-out mini-column per expanded category,
     // positioned against that category's own node — never through
@@ -478,7 +449,10 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({
         .attr('d', (child) => createSubLinkPath(parentX1, subX0, child.y0, child.y1))
         .attr('fill', COLORS.subcategory)
         .attr('fill-opacity', isMobile ? 0.8 : 0.7)
-        .attr('stroke', 'none');
+        .attr('stroke', 'none')
+        // Not interactive themselves, and their fill spans the gap the
+        // expand/collapse badge sits in — must not intercept its clicks.
+        .style('pointer-events', 'none');
 
       const childGroups = subGroup
         .append('g')
@@ -513,6 +487,47 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({
         .style('fill', '#6b7280')
         .text((child) => formatSubcategoryLabel(child, parentLabel));
     });
+
+    // Expand/collapse badge — only on expense nodes with children (R-DM-4).
+    // Appended to `g` directly, as its own layer *after* the fourth-column
+    // pass above, rather than nested inside each node's own <g> (which was
+    // created earlier and therefore always painted, and hit-tested, under
+    // the subcategory links/rects it can visually overlap — the previous
+    // draw order made an expanded category's own badge unclickable). A
+    // filled circle immediately to the right of the node it controls, so it
+    // reads as attached to that node rather than floating in the label gap,
+    // plus a hover cursor on the whole badge group as the interactivity cue.
+    const badgeableNodes = positionedNodes.filter(
+      (node) => node.itemId && (expenseById.get(node.itemId)?.children?.length ?? 0) > 0,
+    );
+    const badgeLayer = g.append('g').attr('class', 'expand-badges');
+    const badgeGroups = badgeLayer
+      .selectAll('g')
+      .data(badgeableNodes)
+      .join('g')
+      .attr('class', 'expand-badge')
+      .style('cursor', 'pointer')
+      .on('click', (_event, d) => {
+        if (d.itemId) onToggleExpand(d.itemId);
+      });
+
+    badgeGroups
+      .append('circle')
+      .attr('cx', (d) => (d.x1 ?? 0) + badgeGapFromNode + badgeRadius)
+      .attr('cy', (d) => (d.y0 ?? 0) + ((d.y1 ?? 0) - (d.y0 ?? 0)) / 2)
+      .attr('r', badgeRadius)
+      .attr('fill', '#4b5563')
+      .attr('fill-opacity', 0.9);
+
+    badgeGroups
+      .append('text')
+      .attr('x', (d) => (d.x1 ?? 0) + badgeGapFromNode + badgeRadius)
+      .attr('y', (d) => (d.y0 ?? 0) + ((d.y1 ?? 0) - (d.y0 ?? 0)) / 2)
+      .attr('dy', '0.35em')
+      .attr('text-anchor', 'middle')
+      .style('font-size', isMobile ? '8px' : '10px')
+      .style('fill', 'white')
+      .text((d) => (d.itemId && expandedIds.has(d.itemId) ? '−' : '+'));
 
   }, [data, incomes, expenses, isMobile, expandedIds, onToggleExpand]);
 
