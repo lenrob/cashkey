@@ -511,6 +511,9 @@ const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpen
                       {displayFrequency === 'monthly' ? 'month' : 'year'}
                     </>
                   )}
+                  {expense.children && expense.children.length > 0 ? (
+                    <> · {expense.children.length} subcategor{expense.children.length === 1 ? 'y' : 'ies'}</>
+                  ) : null}
                 </p>
               </div>
               <Button 
