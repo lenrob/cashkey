@@ -216,11 +216,38 @@ immediately after 1.5, not deferred, so that gap doesn't sit open.
 ### PR 2.1 — localStorage layer
 **Requirements:** R-CMP-1, R-QA-1
 
-Storage module only; no comparison UI yet.
+Storage module only; no comparison UI yet. This is wiring into existing
+types, not designing them: `BudgetSource` already includes `'storage'`,
+`BudgetLoadResult` already carries `savedAs`, and `decodeState` already
+takes a `source` param — all landed in Phase 0 with `'storage'` as the
+anticipated but unproduced case.
 
 - Save, load, list, rename, delete
 - Explicit handling of quota exceeded and storage-unavailable
-- Tests including both failure modes
+- **Saved budgets are version-stamped at save time**, using the same
+  envelope `encodeState` writes — `{ version: CURRENT_SCHEMA_VERSION,
+  ...state }` — minus the percent-encoding (no need to URI-encode inside
+  localStorage). Loaded through `decodeState(json, 'storage')` or a thin
+  wrapper around it — `decodeState` already handles plain (non-percent-
+  encoded) JSON, since `parseEncodedLayers` tries `JSON.parse` before ever
+  attempting to decode. **Why this matters:** `decodeState` treats a
+  missing `version` as v1. An unstamped save is indistinguishable from a
+  legacy link — a budget saved today at v4 (children, frequency, emoji all
+  present) would, after a future version bump, be read as v1 and run
+  through the v1→v2 emoji-extraction migration, corrupting data that was
+  never old. That's worse than the URL case, not equivalent to it: URL
+  links are actually v1 by construction, saved budgets never are
+- A saved budget stamped with a version newer than `CURRENT_SCHEMA_VERSION`
+  (two tabs open across a deploy, or a downgrade) hits
+  `{status: 'invalid', reason: 'unsupported-version'}`, the same path a
+  too-new URL hits — not a silent misread
+- `describeLoadIssues` needs source-aware wording. The `migrated` message
+  currently reads "N items were updated from an older link format" —
+  correct for `source: 'url'`, wrong for `source: 'storage'`, since a saved
+  budget isn't a link
+- Tests including both failure modes, plus: a budget saved under an older
+  `CURRENT_SCHEMA_VERSION` loads correctly after a schema bump, through the
+  same migration path as a legacy URL
 
 ### PR 2.2 — Saved budget library UI
 **Requirements:** R-CMP-1, R-IN-1

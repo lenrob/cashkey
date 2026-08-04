@@ -383,6 +383,11 @@ const migrateFrequencyField: Migration = (record, issues) => {
  * Keyed by the version a payload arrives as; migrates it one step forward.
  * Exported so tests can chain synthetic migrations without waiting for a
  * real schema change to exist.
+ *
+ * No entry for 3: the v3 bump (subcategories, PR 1.4) added `children` as
+ * purely additive and optional, so a pre-v3 item is already valid v3 shape
+ * as-is. `runMigrations` no-ops on a version with no registered step, which
+ * is exactly correct here — not a forgotten migration.
  */
 const MIGRATIONS: Record<number, Migration> = {
   1: migrateEmojiField,
