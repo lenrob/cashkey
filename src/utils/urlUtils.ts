@@ -1,4 +1,5 @@
-import { CashflowItem, CashflowState } from '../types/cashflow';
+import { CashflowItem, CashflowState, CashflowSubItem } from '../types/cashflow';
+import { withRolledUpAmount } from './subcategoryUtils';
 
 /**
  * Why a payload produced no usable budget.
@@ -62,7 +63,7 @@ export const hasIssues = (issues: LoadIssues): boolean =>
  * frequency, ...). A migration must be registered in MIGRATIONS for every
  * version below this one.
  */
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 // A simpler and more URL-friendly encoding scheme.
 // Returns null (not "") on failure, so a write failure stays distinguishable
@@ -148,7 +149,20 @@ const readAmount = (raw: unknown): number | null => {
  * noticing — worse than a visibly odd row. So an item keeps its amount whenever
  * the amount itself is sound, and is only discarded when it cannot be drawn.
  */
-const validateItem = (raw: unknown, issues: LoadIssues): CashflowItem | null => {
+/**
+ * `allowChildren` gates subcategory support to expenses only (R-DM-3):
+ * income call sites pass `false`, so a `children` array on a raw income item
+ * is never even read, let alone validated. When `true`, each raw child is
+ * validated through this same function with `allowChildren: false` — reusing
+ * the drop-and-count rules above, and enforcing one-level nesting by
+ * construction, since that recursive call can never itself produce a
+ * `children` field on the result.
+ */
+const validateItem = (
+  raw: unknown,
+  issues: LoadIssues,
+  allowChildren: boolean = false,
+): CashflowItem | null => {
   if (!isRecord(raw)) {
     issues.droppedMalformed += 1;
     return null;
@@ -203,15 +217,32 @@ const validateItem = (raw: unknown, issues: LoadIssues): CashflowItem | null => 
   // Cosmetic and optional: kept when usable, stripped without comment when not.
   if (typeof raw.color === 'string') item.color = raw.color;
   if (typeof raw.emoji === 'string') item.emoji = raw.emoji;
-  return item;
+
+  if (allowChildren && Array.isArray(raw.children)) {
+    const children: CashflowSubItem[] = [];
+    for (const rawChild of raw.children) {
+      const validatedChild = validateItem(rawChild, issues, false);
+      if (validatedChild !== null) children.push(validatedChild);
+    }
+    if (children.length > 0) item.children = children;
+  }
+
+  // A parent's serialized `amount` is never trusted over its own children —
+  // storing both independently invites drift, so this recomputes it from
+  // whatever children survived validation above.
+  return withRolledUpAmount(item);
 };
 
-const validateItems = (raw: unknown, issues: LoadIssues): CashflowItem[] => {
+const validateItems = (
+  raw: unknown,
+  issues: LoadIssues,
+  allowChildren: boolean = false,
+): CashflowItem[] => {
   if (!Array.isArray(raw)) return [];
 
   const items: CashflowItem[] = [];
   for (const entry of raw) {
-    const item = validateItem(entry, issues);
+    const item = validateItem(entry, issues, allowChildren);
     if (item !== null) items.push(item);
   }
   return items;
@@ -411,7 +442,7 @@ export const decodeState = (
     status: 'loaded',
     state: {
       incomes: validateItems(record.incomes, issues),
-      expenses: validateItems(record.expenses, issues),
+      expenses: validateItems(record.expenses, issues, true),
     },
     source,
     savedAs: null,

@@ -487,6 +487,62 @@ describe("item validation", () => {
   });
 });
 
+describe("subcategory validation (R-DM-3, expenses only)", () => {
+  it("validates an expense's children and rolls up the parent amount from them", () => {
+    const result = decodeJson(
+      '{"incomes":[],"expenses":[{"id":"p","name":"Housing","amount":999,"frequency":"annual","children":[{"id":"c1","name":"Mortgage","amount":1500,"frequency":"annual"},{"id":"c2","name":"Insurance","amount":300,"frequency":"annual"}]}]}',
+    );
+    const [housing] = stateOf(result).expenses;
+    expect(housing.children).toEqual([
+      { id: "c1", name: "Mortgage", amount: 1500, frequency: "annual" },
+      { id: "c2", name: "Insurance", amount: 300, frequency: "annual" },
+    ]);
+    // The serialized 999 disagrees with the children and is never trusted.
+    expect(housing.amount).toBe(1800);
+  });
+
+  it("drops a malformed child and rolls up from the ones that survive", () => {
+    const result = decodeJson(
+      '{"incomes":[],"expenses":[{"id":"p","name":"Housing","amount":0,"frequency":"annual","children":[{"id":"c1","name":"Mortgage","amount":1500,"frequency":"annual"},{"junk":1}]}]}',
+    );
+    const [housing] = stateOf(result).expenses;
+    expect(housing.children).toEqual([
+      { id: "c1", name: "Mortgage", amount: 1500, frequency: "annual" },
+    ]);
+    expect(housing.amount).toBe(1500);
+    expect(issuesOf(result).droppedMalformed).toBe(1);
+  });
+
+  it("treats an empty children array as flat, keeping the direct amount", () => {
+    const result = decodeJson(
+      '{"incomes":[],"expenses":[{"id":"p","name":"Housing","amount":2000,"frequency":"annual","children":[]}]}',
+    );
+    const [housing] = stateOf(result).expenses;
+    expect(housing.children).toBeUndefined();
+    expect(housing.amount).toBe(2000);
+  });
+
+  it("strips a children array from an income item — subcategories are expenses only", () => {
+    const result = decodeJson(
+      '{"incomes":[{"id":"p","name":"Salary","amount":1000,"frequency":"annual","children":[{"id":"c1","name":"Bonus","amount":500,"frequency":"annual"}]}],"expenses":[]}',
+    );
+    const [salary] = stateOf(result).incomes;
+    expect(salary).not.toHaveProperty("children");
+    expect(salary.amount).toBe(1000);
+  });
+
+  it("flattens away a grandchild — nesting is one level deep only", () => {
+    const result = decodeJson(
+      '{"incomes":[],"expenses":[{"id":"p","name":"Housing","amount":0,"frequency":"annual","children":[{"id":"c1","name":"Mortgage","amount":1500,"frequency":"annual","children":[{"id":"g1","name":"Escrow","amount":200,"frequency":"annual"}]}]}]}',
+    );
+    const [housing] = stateOf(result).expenses;
+    expect(housing.children).toEqual([
+      { id: "c1", name: "Mortgage", amount: 1500, frequency: "annual" },
+    ]);
+    expect(housing.children![0]).not.toHaveProperty("children");
+  });
+});
+
 describe("describeLoadIssues", () => {
   it("returns null when nothing needed changing", () => {
     expect(describeLoadIssues(noIssues())).toBeNull();
@@ -800,6 +856,18 @@ describe("schema version envelope", () => {
       `{"version":${CURRENT_SCHEMA_VERSION},"incomes":[],"expenses":[]}`,
     );
     expect(result.status).toBe("loaded");
+  });
+
+  it("loads a v3 payload (no children field) cleanly with no registered v3 migration", () => {
+    // R-DM-3 added an optional field, not a shape change to anything
+    // existing — a v3 item is already valid v4 shape, so runMigrations'
+    // pass-through for an unregistered version key is the whole migration.
+    const result = decodeJson(
+      '{"version":3,"incomes":[{"id":"i","name":"Salary","amount":1000,"frequency":"annual"}],"expenses":[{"id":"e","name":"Housing","amount":2000,"frequency":"annual"}]}',
+    );
+    expect(result.status).toBe("loaded");
+    expect(issuesOf(result).migrated).toBe(0);
+    expect(stateOf(result).expenses[0]).not.toHaveProperty("children");
   });
 });
 
