@@ -250,9 +250,11 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({
       const sourceY = sourceOffsets[d.source.index];
       const targetY = targetOffsets[d.target.index];
 
-      // Calculate heights based on the link's value
-      const sourceHeight = (d.value / d.source.value) * (d.source.y1 - d.source.y0);
-      const targetHeight = (d.value / d.target.value) * (d.target.y1 - d.target.y0);
+      // Calculate heights based on the link's value. A category can be $0
+      // (e.g. right after its last subcategory is removed — R-DM-3), which
+      // zeroes the node's own value too and would otherwise divide by zero.
+      const sourceHeight = d.source.value > 0 ? (d.value / d.source.value) * (d.source.y1 - d.source.y0) : 0;
+      const targetHeight = d.target.value > 0 ? (d.value / d.target.value) * (d.target.y1 - d.target.y0) : 0;
 
       // Update offsets for next link
       sourceOffsets[d.source.index] += sourceHeight;

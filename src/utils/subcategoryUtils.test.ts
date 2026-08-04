@@ -6,6 +6,7 @@ import {
   hasDirectAmountConflict,
   addSubcategory,
   removeSubcategory,
+  preservedChildId,
   SubcategoryConflictError,
 } from './subcategoryUtils';
 
@@ -128,5 +129,41 @@ describe('removeSubcategory', () => {
 
     p = removeSubcategory(p, p.children![0].id);
     expect(p.amount).toBe(rollupAmount(p));
+  });
+
+  it('removing the last child and adding again does not require a strategy', () => {
+    // The conflict only fires for a *direct* amount. Once the last child is
+    // removed, removeSubcategory has already zeroed the parent's amount, so
+    // this is the same no-conflict path as a brand-new zero-amount parent —
+    // not a special case, but worth pinning down explicitly.
+    let p = parent({ amount: 2000 });
+    p = addSubcategory(p, child({ amount: 2000 }), 'discard');
+    expect(hasDirectAmountConflict(p)).toBe(false);
+
+    p = removeSubcategory(p, p.children![0].id);
+    expect(p.amount).toBe(0);
+    expect(hasDirectAmountConflict(p)).toBe(false);
+
+    expect(() => addSubcategory(p, child({ name: 'Rent', amount: 1800 }))).not.toThrow();
+  });
+});
+
+describe('preservedChildId', () => {
+  it("identifies the preserved child after a 'preserve' add", () => {
+    const added = child({ amount: 1500 });
+    const result = addSubcategory(parent(), added, 'preserve');
+    const preservedId = preservedChildId(result, added.id);
+    expect(preservedId).not.toBeNull();
+    expect(result.children!.find((c) => c.id === preservedId)!.name).toBe('Housing (unallocated)');
+  });
+
+  it("returns null after a 'discard' add, where the added child is the only one", () => {
+    const added = child({ amount: 1500 });
+    const result = addSubcategory(parent(), added, 'discard');
+    expect(preservedChildId(result, added.id)).toBeNull();
+  });
+
+  it('returns null when the parent has no children at all', () => {
+    expect(preservedChildId(parent(), 'anything')).toBeNull();
   });
 });

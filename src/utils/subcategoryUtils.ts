@@ -102,3 +102,15 @@ export const removeSubcategory = (parent: CashflowItem, childId: string): Cashfl
 
   return withRolledUpAmount({ ...parent, children });
 };
+
+/**
+ * Identifies the child a 'preserve' strategy just carried forward, so the UI
+ * can open it for immediate rename (R-DM-3: "the user should be able to
+ * rename the preserved child at the point of choosing"). Deliberately
+ * doesn't assume the preserved child sits at a fixed index — it finds
+ * whichever child isn't the one the caller just added. Returns null when
+ * there's nothing to preserve (e.g. after a 'discard' add, where the added
+ * child is the only one).
+ */
+export const preservedChildId = (parent: CashflowItem, addedChildId: string): string | null =>
+  parent.children?.find((child) => child.id !== addedChildId)?.id ?? null;
