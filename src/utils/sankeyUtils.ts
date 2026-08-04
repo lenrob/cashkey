@@ -18,9 +18,38 @@ export interface SubcategoryLayoutNode {
   label: string;
   amount: number;
   /** Percentage of the parent's own rolled-up total, not the whole budget —
-   *  this column shows composition of the category, not share of the budget. */
+   *  this column shows composition of the category, not share of the budget.
+   *  Exact (unrounded) — used for proportional height, not display. */
   percentage: number;
+  /** Integer percentage for display, rounded so a category's children sum to
+   *  exactly 100 (largest-remainder method) rather than each being rounded
+   *  independently, which can land a category's total a point or two off
+   *  100 and read as a math error. */
+  displayPercentage: number;
 }
+
+/**
+ * Rounds a set of percentages that sum to ~100 down to integers whose sum is
+ * exactly 100, by giving the extra point(s) to the values with the largest
+ * fractional remainder. Naive independent rounding (each value to its own
+ * nearest integer) can miss or overshoot 100 by a point or two.
+ */
+const roundPercentagesTo100 = (values: number[]): number[] => {
+  if (values.length === 0) return [];
+
+  const floors = values.map((value) => Math.floor(value));
+  const remainder = 100 - floors.reduce((sum, value) => sum + value, 0);
+
+  const byRemainder = values
+    .map((value, index) => ({ index, fraction: value - floors[index] }))
+    .sort((a, b) => b.fraction - a.fraction);
+
+  const result = [...floors];
+  for (let i = 0; i < remainder; i += 1) {
+    result[byRemainder[i % byRemainder.length].index] += 1;
+  }
+  return result;
+};
 
 /**
  * Layout data for one expanded expense category's fourth column. Percentages
@@ -30,11 +59,16 @@ export interface SubcategoryLayoutNode {
  */
 export const getSubcategoryLayoutNodes = (item: CashflowItem): SubcategoryLayoutNode[] => {
   const total = rollupAmount(item);
-  return (item.children ?? []).map((child) => ({
+  const children = item.children ?? [];
+  const percentages = children.map((child) => (total > 0 ? (child.amount / total) * 100 : 0));
+  const displayPercentages = total > 0 ? roundPercentagesTo100(percentages) : percentages.map(() => 0);
+
+  return children.map((child, index) => ({
     id: child.id,
     label: itemDisplayName(child),
     amount: child.amount,
-    percentage: total > 0 ? (child.amount / total) * 100 : 0,
+    percentage: percentages[index],
+    displayPercentage: displayPercentages[index],
   }));
 };
 

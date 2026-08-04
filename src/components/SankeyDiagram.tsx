@@ -26,9 +26,20 @@ interface PositionedSankeyNode extends SankeyNodeMinimal<object, object> {
   percentage?: number;
 }
 
-const formatSubcategoryLabel = (child: SubcategoryLayoutNode): string => {
-  const percentage = child.percentage < 1 ? '<1' : Math.round(child.percentage);
-  return `${percentage}% ${child.label}`;
+
+/**
+ * Explicitly states the denominator ("of Housing"), not just a bare
+ * percentage — children show share-of-parent while the parent itself shows
+ * share-of-total-budget, and with identical formatting those two different
+ * scales read as one and invite summing. Spelling out "of {parent}" makes
+ * the denominator unambiguous without relying on styling alone.
+ */
+const formatSubcategoryLabel = (child: SubcategoryLayoutNode, parentLabel: string): string =>
+  `${child.label} — ${child.displayPercentage}% of ${parentLabel}`;
+
+const formatMainLabel = (percentage: number, name: string): string => {
+  const pct = percentage < 1 ? '<1' : Math.round(percentage);
+  return `${pct}% ${name}`;
 };
 
 const SankeyDiagram: React.FC<SankeyDiagramProps> = ({
@@ -59,40 +70,77 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({
     // manually laid-out mini-column, height-matched to that category's own
     // node (rollup guarantees children sum to the parent's height).
     const subNodeWidth = isMobile ? 8 : 14;
-    const subColumnGap = isMobile ? 24 : 40;
     const subLabelOffset = isMobile ? 4 : 8;
     const subFontSize = isMobile ? 8 : 11;
-    const chevronSpace = isMobile ? 10 : 14;
+    const mainLabelFontSize = isMobile ? 9 : 12;
 
-    // Measured against every currently expanded category's children, not
-    // just the first one open — two categories with long child names open
-    // together must both fit without clipping.
-    let maxLabelWidth = 0;
-    if (expandedExpenses.length > 0) {
-      const measureLayer = d3.select(svgRef.current).append('g').style('visibility', 'hidden');
-      expandedExpenses.forEach((expense) => {
-        getSubcategoryLayoutNodes(expense).forEach((child) => {
-          const textEl = measureLayer
-            .append('text')
-            .style('font-size', `${subFontSize}px`)
-            .text(formatSubcategoryLabel(child));
-          const node = textEl.node();
-          if (node) {
-            maxLabelWidth = Math.max(maxLabelWidth, node.getBBox().width);
-          }
-        });
+    // Expand/collapse badge — a filled circle so it reads as a control
+    // regardless of the node's own fill color, placed right against the
+    // node it toggles rather than out in the label gap.
+    const badgeRadius = isMobile ? 6 : 8;
+    const badgeGapFromNode = isMobile ? 3 : 5;
+    const badgeToLabelGap = isMobile ? 4 : 6;
+    const badgeSpan = badgeGapFromNode + badgeRadius * 2 + badgeToLabelGap;
+
+    // Pre-layout node data (from `processSankeyData`, before `sankeyGenerator`)
+    // for expense items specifically — the only category guaranteed an
+    // `itemId`, needed to measure each expanded category's own main-column
+    // label ahead of laying out its fourth column. The intersection type
+    // (rather than a separately declared interface) keeps every field the
+    // real union members carry, so it validly narrows `data.nodes`' type.
+    type SankeyNodeData = (typeof data.nodes)[number];
+    const isExpenseNodeData = (
+      node: SankeyNodeData,
+    ): node is SankeyNodeData & { itemId: string; percentage: number } => node.category === 'expense';
+
+    const expenseNodeDataById = new Map(
+      data.nodes.filter(isExpenseNodeData).map((node) => [node.itemId, node]),
+    );
+
+    const measureLayer = d3.select(svgRef.current).append('g').style('visibility', 'hidden');
+    const measureTextWidth = (text: string, fontSize: number): number => {
+      const textEl = measureLayer.append('text').style('font-size', `${fontSize}px`).text(text);
+      const node = textEl.node();
+      return node ? node.getBBox().width : 0;
+    };
+
+    // The gap before the fourth column must clear each expanded category's
+    // own main-column label (drawn at x1 + badge + label gap), or a wide
+    // parent label like "28% 🏡 Housing" runs straight into the child
+    // column. Measured per category, then the widest one sets a single
+    // shared column start so the fourth column reads as one straight edge.
+    // Also measures every expanded category's children, not just the first
+    // one open, so two categories with long child names opened together
+    // both fit without clipping.
+    let maxParentLabelWidth = 0;
+    let maxChildLabelWidth = 0;
+    expandedExpenses.forEach((expense) => {
+      const nodeData = expenseNodeDataById.get(expense.id);
+      if (nodeData) {
+        const parentLabelWidth = measureTextWidth(
+          formatMainLabel(nodeData.percentage, nodeData.name),
+          mainLabelFontSize,
+        );
+        maxParentLabelWidth = Math.max(maxParentLabelWidth, parentLabelWidth);
+      }
+
+      const parentLabel = nodeData?.name ?? expense.name;
+      getSubcategoryLayoutNodes(expense).forEach((child) => {
+        const childLabelWidth = measureTextWidth(formatSubcategoryLabel(child, parentLabel), subFontSize);
+        maxChildLabelWidth = Math.max(maxChildLabelWidth, childLabelWidth);
       });
-      measureLayer.remove();
-    }
+    });
+    measureLayer.remove();
 
     const hasExpanded = expandedExpenses.length > 0;
+    const subColumnGap = badgeSpan + maxParentLabelWidth + (isMobile ? 16 : 24);
 
     // Set up dimensions
     const baseMargin = isMobile
       ? { top: 30, right: 50, bottom: 30, left: 50 } // Minimal side margins for mobile
       : { top: 30, right: 180, bottom: 30, left: 180 };
     const extraRight = hasExpanded
-      ? subColumnGap + subNodeWidth + subLabelOffset + maxLabelWidth + (isMobile ? 12 : 20)
+      ? subColumnGap + subNodeWidth + subLabelOffset + maxChildLabelWidth + (isMobile ? 12 : 20)
       : 0;
     const margin = { ...baseMargin, right: baseMargin.right + extraRight };
     const width = svgRef.current.clientWidth;
@@ -271,7 +319,7 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({
         const isBudget = d.name === 'Budget';
         const isLeftSide = sankeyData.nodes.indexOf(d) < sankeyData.nodes.findIndex((n: any) => n.name === 'Budget');
         const hasChildren = !isLeftSide && !!expenseById.get(d.itemId)?.children?.length;
-        const labelOffset = (isMobile ? 5 : 10) + (hasChildren ? chevronSpace : 0);
+        const labelOffset = hasChildren ? badgeSpan : (isMobile ? 5 : 10);
         return isBudget ? d.x0 + (d.x1 - d.x0) / 2 :
                isLeftSide ? d.x0 - labelOffset : d.x1 + labelOffset;
       })
@@ -334,22 +382,36 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({
         });
     }
 
-    // Expand/collapse chevron affordance — only on expense nodes with
-    // children (R-DM-4). Drawn just outside the node's right edge, ahead of
-    // the node's own label (which was shifted right above to make room).
+    // Expand/collapse badge — only on expense nodes with children (R-DM-4).
+    // A filled circle immediately to the right of the node it controls, so
+    // it reads as attached to that node rather than floating in the label
+    // gap, plus a hover cursor on the whole badge group as the interactivity
+    // cue.
     const positionedNodes = sankeyData.nodes as PositionedSankeyNode[];
-    nodeGroups
+    const badgeGroups = nodeGroups
       .filter((d: any) => !!expenseById.get(d.itemId)?.children?.length)
+      .append('g')
+      .attr('class', 'expand-badge')
+      .style('cursor', 'pointer')
+      .on('click', (_event, d: any) => onToggleExpand(d.itemId));
+
+    badgeGroups
+      .append('circle')
+      .attr('cx', (d: any) => d.x1 + badgeGapFromNode + badgeRadius)
+      .attr('cy', (d: any) => d.y0 + (d.y1 - d.y0) / 2)
+      .attr('r', badgeRadius)
+      .attr('fill', '#4b5563')
+      .attr('fill-opacity', 0.9);
+
+    badgeGroups
       .append('text')
-      .attr('x', (d: any) => d.x1 + (isMobile ? 1 : 2))
+      .attr('x', (d: any) => d.x1 + badgeGapFromNode + badgeRadius)
       .attr('y', (d: any) => d.y0 + (d.y1 - d.y0) / 2)
       .attr('dy', '0.35em')
-      .attr('text-anchor', 'start')
-      .style('cursor', 'pointer')
+      .attr('text-anchor', 'middle')
       .style('font-size', isMobile ? '8px' : '10px')
-      .style('fill', '#4b5563')
-      .text((d: any) => (expandedIds.has(d.itemId) ? '▾' : '▸'))
-      .on('click', (_event, d: any) => onToggleExpand(d.itemId));
+      .style('fill', 'white')
+      .text((d: any) => (expandedIds.has(d.itemId) ? '−' : '+'));
 
     // Fourth column: one manually laid-out mini-column per expanded category,
     // positioned against that category's own node — never through
@@ -386,6 +448,7 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({
       const parentX1 = parentNode.x1;
       const parentY0 = parentNode.y0;
       const parentY1 = parentNode.y1;
+      const parentLabel = expenseNodeDataById.get(expense.id)?.name ?? expense.name;
 
       const children = getSubcategoryLayoutNodes(expense);
       const totalHeight = parentY1 - parentY0;
@@ -435,6 +498,10 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({
         .attr('rx', 3)
         .attr('ry', 3);
 
+      // Styled distinctly from the parent's own label (lighter, italic) as a
+      // second, non-textual cue that these percentages are on a different
+      // scale (share-of-category, not share-of-budget) — on top of the
+      // "of {parent}" wording itself.
       childGroups
         .append('text')
         .attr('x', subX1 + subLabelOffset)
@@ -442,8 +509,9 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({
         .attr('dy', '0.35em')
         .attr('text-anchor', 'start')
         .style('font-size', `${subFontSize}px`)
-        .style('fill', '#4b5563')
-        .text(formatSubcategoryLabel);
+        .style('font-style', 'italic')
+        .style('fill', '#6b7280')
+        .text((child) => formatSubcategoryLabel(child, parentLabel));
     });
 
   }, [data, incomes, expenses, isMobile, expandedIds, onToggleExpand]);
