@@ -19,6 +19,22 @@ const description =
 const Index = () => {
   const [incomes, setIncomes] = useState<CashflowItem[]>([]);
   const [expenses, setExpenses] = useState<CashflowItem[]>([]);
+  // View state only (R-DM-5) — never serialized to the URL or localStorage,
+  // and lifted above SankeyDiagram so a future A/B toggle (PR 3.1) can
+  // remount that component without resetting expansion mid-session.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const handleToggleExpand = (itemId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  };
 
   // Update the document title and metadata
   useEffect(() => {
@@ -187,6 +203,8 @@ const Index = () => {
             <SankeyDiagram
               incomes={incomes}
               expenses={expenses}
+              expandedIds={expandedIds}
+              onToggleExpand={handleToggleExpand}
               className="animate-fade-in [animation-delay:300ms]"
             />
 

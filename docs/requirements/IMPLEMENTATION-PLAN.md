@@ -189,6 +189,26 @@ Data model only. No chart changes in this PR.
 - Multiple simultaneous expansions
 - Expansion state held in component state — never serialized (R-DM-5)
 
+### PR 1.5b — Manage subcategories UI
+**Requirements:** R-DM-3
+
+Not assigned a home by the original plan. `addSubcategory` (PR 1.4) throws
+`SubcategoryConflictError` when adding a first child would silently
+reinterpret an existing direct amount — that's the data layer's half of
+"explicit, non-silent" (R-DM-3); nothing yet catches it or prompts the user.
+Until this PR, `children` is only reachable via a hand-crafted URL payload:
+PR 1.5 renders subcategories that nothing in the UI can create. Sequenced
+immediately after 1.5, not deferred, so that gap doesn't sit open.
+
+- Add/remove subcategory controls on an expense item, in the edit form
+- Catch `SubcategoryConflictError` and prompt for `'preserve'` vs
+  `'discard'` before calling `addSubcategory` again with a strategy
+- Editing a subcategory's own amount/name/frequency
+- Tests: conflict prompt triggers only on a first child added to an item
+  with a direct amount; `'preserve'` and `'discard'` both round-trip through
+  the UI to the same results `subcategoryUtils.test.ts` already covers at
+  the function level
+
 ---
 
 ## Phase 2 — Persistence

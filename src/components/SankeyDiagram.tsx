@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { sankey, SankeyNodeMinimal } from 'd3-sankey';
 import { CashflowItem } from '../types/cashflow';
-import { processSankeyData } from '../utils/sankeyUtils';
+import { COLORS, getSubcategoryLayoutNodes, processSankeyData, SubcategoryLayoutNode } from '../utils/sankeyUtils';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 
@@ -10,23 +10,91 @@ interface SankeyDiagramProps {
   incomes: CashflowItem[];
   expenses: CashflowItem[];
   className?: string;
+  /** Item ids currently expanded to show their fourth-column subcategories.
+   *  View state only (R-DM-5) — owned by the caller, never serialized. */
+  expandedIds: Set<string>;
+  onToggleExpand: (itemId: string) => void;
 }
 
-const SankeyDiagram: React.FC<SankeyDiagramProps> = ({ incomes, expenses, className }) => {
+/** Node shape after `sankeyGenerator()` has assigned layout fields, typed
+ *  against the properties `processSankeyData` puts on every node. */
+interface PositionedSankeyNode extends SankeyNodeMinimal<object, object> {
+  name: string;
+  itemId?: string;
+  category: 'income' | 'expense' | 'balance';
+  fill: string;
+  percentage?: number;
+}
+
+const formatSubcategoryLabel = (child: SubcategoryLayoutNode): string => {
+  const percentage = child.percentage < 1 ? '<1' : Math.round(child.percentage);
+  return `${percentage}% ${child.label}`;
+};
+
+const SankeyDiagram: React.FC<SankeyDiagramProps> = ({
+  incomes,
+  expenses,
+  className,
+  expandedIds,
+  onToggleExpand,
+}) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const data = processSankeyData(incomes, expenses);
   const isMobile = useIsMobile();
-  
+
   useEffect(() => {
     if (!svgRef.current || !data.nodes.length) return;
 
     // Clear previous content
     d3.select(svgRef.current).selectAll('*').remove();
 
+    const expenseById = new Map(expenses.map((expense) => [expense.id, expense]));
+    const expandedExpenses = expenses.filter(
+      (expense) => expandedIds.has(expense.id) && expense.children && expense.children.length > 0,
+    );
+
+    // Fourth-column sizing. Bypasses sankeyGenerator entirely for this part —
+    // d3-sankey's automatic depth algorithm assumes a uniform graph, which a
+    // partially-expanded budget isn't. Each expanded category instead gets a
+    // manually laid-out mini-column, height-matched to that category's own
+    // node (rollup guarantees children sum to the parent's height).
+    const subNodeWidth = isMobile ? 8 : 14;
+    const subColumnGap = isMobile ? 24 : 40;
+    const subLabelOffset = isMobile ? 4 : 8;
+    const subFontSize = isMobile ? 8 : 11;
+    const chevronSpace = isMobile ? 10 : 14;
+
+    // Measured against every currently expanded category's children, not
+    // just the first one open — two categories with long child names open
+    // together must both fit without clipping.
+    let maxLabelWidth = 0;
+    if (expandedExpenses.length > 0) {
+      const measureLayer = d3.select(svgRef.current).append('g').style('visibility', 'hidden');
+      expandedExpenses.forEach((expense) => {
+        getSubcategoryLayoutNodes(expense).forEach((child) => {
+          const textEl = measureLayer
+            .append('text')
+            .style('font-size', `${subFontSize}px`)
+            .text(formatSubcategoryLabel(child));
+          const node = textEl.node();
+          if (node) {
+            maxLabelWidth = Math.max(maxLabelWidth, node.getBBox().width);
+          }
+        });
+      });
+      measureLayer.remove();
+    }
+
+    const hasExpanded = expandedExpenses.length > 0;
+
     // Set up dimensions
-    const margin = isMobile 
+    const baseMargin = isMobile
       ? { top: 30, right: 50, bottom: 30, left: 50 } // Minimal side margins for mobile
       : { top: 30, right: 180, bottom: 30, left: 180 };
+    const extraRight = hasExpanded
+      ? subColumnGap + subNodeWidth + subLabelOffset + maxLabelWidth + (isMobile ? 12 : 20)
+      : 0;
+    const margin = { ...baseMargin, right: baseMargin.right + extraRight };
     const width = svgRef.current.clientWidth;
     const height = isMobile ? 450 : 450;
     const innerWidth = width - margin.left - margin.right;
@@ -57,12 +125,12 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({ incomes, expenses, classN
           name: node.name.split('\n')[0],
           fill: node.color,
         };
-        
+
         // Set minimum height for budget node on desktop
         if (!isMobile && isBudget) {
           nodeData.height = Math.max(innerHeight * 0.5, nodeData.height || 0);
         }
-        
+
         return nodeData;
       }),
       links: data.links
@@ -129,11 +197,11 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({ incomes, expenses, classN
     const createLinkPath = (d: any) => {
       const sourceX = d.source.x1;
       const targetX = d.target.x0;
-      
+
       // Calculate vertical positions based on accumulated offsets
       const sourceY = sourceOffsets[d.source.index];
       const targetY = targetOffsets[d.target.index];
-      
+
       // Calculate heights based on the link's value
       const sourceHeight = (d.value / d.source.value) * (d.source.y1 - d.source.y0);
       const targetHeight = (d.value / d.target.value) * (d.target.y1 - d.target.y0);
@@ -189,14 +257,21 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({ incomes, expenses, classN
       .attr('fill', (d: any) => d.fill)
       .attr('fill-opacity', 0.9)
       .attr('rx', 4)
-      .attr('ry', 4);
+      .attr('ry', 4)
+      .style('cursor', (d: any) => (expenseById.get(d.itemId)?.children?.length ? 'pointer' : 'default'))
+      .on('click', (_event, d: any) => {
+        if (expenseById.get(d.itemId)?.children?.length) {
+          onToggleExpand(d.itemId);
+        }
+      });
 
     // Add node labels
     nodeGroups.append('text')
       .attr('x', (d: any) => {
         const isBudget = d.name === 'Budget';
         const isLeftSide = sankeyData.nodes.indexOf(d) < sankeyData.nodes.findIndex((n: any) => n.name === 'Budget');
-        const labelOffset = isMobile ? 5 : 10; // Further reduced offset for mobile
+        const hasChildren = !isLeftSide && !!expenseById.get(d.itemId)?.children?.length;
+        const labelOffset = (isMobile ? 5 : 10) + (hasChildren ? chevronSpace : 0);
         return isBudget ? d.x0 + (d.x1 - d.x0) / 2 :
                isLeftSide ? d.x0 - labelOffset : d.x1 + labelOffset;
       })
@@ -212,7 +287,7 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({ incomes, expenses, classN
         if (isMobile) {
           const isBudget = d.name === 'Budget';
           if (isBudget) return ''; // No rotation for budget node
-          
+
           const isLeftSide = sankeyData.nodes.indexOf(d) < sankeyData.nodes.findIndex((n: any) => n.name === 'Budget');
           // Left side labels tilt up, right side labels tilt down
           const angle = isLeftSide ? 30 : -30; // Slightly less angled for better readability
@@ -228,7 +303,7 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({ incomes, expenses, classN
         // Show "< 1%" for percentages under 1%, otherwise show rounded integer
         const percentage = d.percentage < 1 ? '<1' : Math.round(d.percentage);
         let displayName = d.name;
-        
+
         if (isMobile) {
           // Trim longer names on mobile
           if (displayName.length > 12) {
@@ -237,7 +312,7 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({ incomes, expenses, classN
           // Keep on same line but use very compact format
           return `${percentage}%${displayName}`;
         }
-        
+
         return `${percentage}% ${displayName}`;
       });
 
@@ -249,7 +324,7 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({ incomes, expenses, classN
           // Add a shadow effect to improve readability now that labels are closer to nodes
           const textElem = d3.select(this);
           const original = textElem.text();
-          
+
           if (original && original.length > 0) {
             textElem
               .attr('stroke', 'white')
@@ -259,7 +334,119 @@ const SankeyDiagram: React.FC<SankeyDiagramProps> = ({ incomes, expenses, classN
         });
     }
 
-  }, [data, incomes, expenses, isMobile]);
+    // Expand/collapse chevron affordance — only on expense nodes with
+    // children (R-DM-4). Drawn just outside the node's right edge, ahead of
+    // the node's own label (which was shifted right above to make room).
+    const positionedNodes = sankeyData.nodes as PositionedSankeyNode[];
+    nodeGroups
+      .filter((d: any) => !!expenseById.get(d.itemId)?.children?.length)
+      .append('text')
+      .attr('x', (d: any) => d.x1 + (isMobile ? 1 : 2))
+      .attr('y', (d: any) => d.y0 + (d.y1 - d.y0) / 2)
+      .attr('dy', '0.35em')
+      .attr('text-anchor', 'start')
+      .style('cursor', 'pointer')
+      .style('font-size', isMobile ? '8px' : '10px')
+      .style('fill', '#4b5563')
+      .text((d: any) => (expandedIds.has(d.itemId) ? '▾' : '▸'))
+      .on('click', (_event, d: any) => onToggleExpand(d.itemId));
+
+    // Fourth column: one manually laid-out mini-column per expanded category,
+    // positioned against that category's own node — never through
+    // sankeyGenerator (see comment above on sizing).
+    const nodeByItemId = new Map<string, PositionedSankeyNode>();
+    positionedNodes.forEach((node) => {
+      if (node.itemId) nodeByItemId.set(node.itemId, node);
+    });
+
+    const childPadding = isMobile ? 3 : 4;
+    const createSubLinkPath = (sourceX: number, targetX: number, y0: number, y1: number) => {
+      const curvature = isMobile ? 0.2 : 0.5;
+      const c1 = sourceX * (1 - curvature) + targetX * curvature;
+      const c2 = sourceX * curvature + targetX * (1 - curvature);
+      return `
+        M${sourceX},${y0}
+        C${c1},${y0} ${c2},${y0} ${targetX},${y0}
+        L${targetX},${y1}
+        C${c2},${y1} ${c1},${y1} ${sourceX},${y1}
+        Z
+      `;
+    };
+
+    expandedExpenses.forEach((expense) => {
+      const parentNode = nodeByItemId.get(expense.id);
+      if (
+        !parentNode ||
+        typeof parentNode.y0 !== 'number' ||
+        typeof parentNode.y1 !== 'number' ||
+        typeof parentNode.x1 !== 'number'
+      ) {
+        return;
+      }
+      const parentX1 = parentNode.x1;
+      const parentY0 = parentNode.y0;
+      const parentY1 = parentNode.y1;
+
+      const children = getSubcategoryLayoutNodes(expense);
+      const totalHeight = parentY1 - parentY0;
+      const paddingTotal = Math.min(childPadding * Math.max(children.length - 1, 0), totalHeight * 0.3);
+      const available = totalHeight - paddingTotal;
+
+      let cursor = parentY0;
+      const positionedChildren = children.map((child, i) => {
+        const childHeight = (child.percentage / 100) * available;
+        const y0 = cursor;
+        const y1 = cursor + childHeight;
+        cursor = y1 + (i < children.length - 1 ? childPadding : 0);
+        return { ...child, y0, y1 };
+      });
+
+      const subX0 = parentX1 + subColumnGap;
+      const subX1 = subX0 + subNodeWidth;
+
+      const subGroup = g.append('g').attr('class', 'subcategory-group');
+
+      subGroup
+        .append('g')
+        .attr('class', 'subcategory-links')
+        .selectAll('path')
+        .data(positionedChildren)
+        .join('path')
+        .attr('d', (child) => createSubLinkPath(parentX1, subX0, child.y0, child.y1))
+        .attr('fill', COLORS.subcategory)
+        .attr('fill-opacity', isMobile ? 0.8 : 0.7)
+        .attr('stroke', 'none');
+
+      const childGroups = subGroup
+        .append('g')
+        .attr('class', 'subcategory-nodes')
+        .selectAll('g')
+        .data(positionedChildren)
+        .join('g');
+
+      childGroups
+        .append('rect')
+        .attr('x', subX0)
+        .attr('y', (child) => child.y0)
+        .attr('width', subNodeWidth)
+        .attr('height', (child) => Math.max(child.y1 - child.y0, 0))
+        .attr('fill', COLORS.subcategory)
+        .attr('fill-opacity', 0.9)
+        .attr('rx', 3)
+        .attr('ry', 3);
+
+      childGroups
+        .append('text')
+        .attr('x', subX1 + subLabelOffset)
+        .attr('y', (child) => (child.y0 + child.y1) / 2)
+        .attr('dy', '0.35em')
+        .attr('text-anchor', 'start')
+        .style('font-size', `${subFontSize}px`)
+        .style('fill', '#4b5563')
+        .text(formatSubcategoryLabel);
+    });
+
+  }, [data, incomes, expenses, isMobile, expandedIds, onToggleExpand]);
 
   return (
     <div className={cn("w-full mt-6", className)} style={{ height: isMobile ? 450 : 450 }}>

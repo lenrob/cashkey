@@ -1,13 +1,41 @@
 import { CashflowItem } from '../types/cashflow';
 import { itemDisplayName } from './cashflowUtils';
+import { rollupAmount } from './subcategoryUtils';
 
 // Softer, more neutral color palette with accent colors
 export const COLORS = {
   income: '#8E9EF0',   // Soft blue
   expense: '#9ADCB9',  // Soft green
+  subcategory: '#C3ECD8', // Lighter green, one shade off expense for the 4th column
   surplus: '#9b87f5',  // Soft purple
   deficit: '#F7A097',  // Soft red-orange
   budget: '#F1C40F',   // Gold for budget node
+};
+
+/** A single child rendered in an expanded category's fourth column. */
+export interface SubcategoryLayoutNode {
+  id: string;
+  label: string;
+  amount: number;
+  /** Percentage of the parent's own rolled-up total, not the whole budget —
+   *  this column shows composition of the category, not share of the budget. */
+  percentage: number;
+}
+
+/**
+ * Layout data for one expanded expense category's fourth column. Percentages
+ * are relative to the parent's rollup total (R-DM-3), so they sum to 100
+ * across a category's children regardless of that category's share of the
+ * overall budget.
+ */
+export const getSubcategoryLayoutNodes = (item: CashflowItem): SubcategoryLayoutNode[] => {
+  const total = rollupAmount(item);
+  return (item.children ?? []).map((child) => ({
+    id: child.id,
+    label: itemDisplayName(child),
+    amount: child.amount,
+    percentage: total > 0 ? (child.amount / total) * 100 : 0,
+  }));
 };
 
 export const formatCurrencyValue = (value: number): string => {
