@@ -27,8 +27,20 @@ re-proposed.
 Each income and expense line item stores its own entry frequency (monthly or
 annual). Amounts are stored normalized to **annual** in the data model.
 
-The existing global monthly/annual control becomes a **display** toggle: it
-changes the units shown in the chart, totals, and list, but does not change
+**Correction (post-PR-1.3):** this requirement originally said "the existing
+global monthly/annual control becomes a display toggle," describing PR 1.3 as
+converting something already there. There was no such control. The
+pre-existing period `Select` on the add-item form was local, per-add-click
+state: it converted a typed monthly figure to annual before the item was
+ever constructed, then discarded the choice — nothing was stored on the
+item, nothing was stored globally, and the edit form had no period control
+at all. PR 1.3 **introduces** a global display toggle, built display-only
+from the start, rather than converting an existing one. Below reflects what
+was actually built.
+
+A separate, new global display toggle changes the units shown in the totals
+and list — the Sankey chart itself renders no dollar figures, only
+unit-invariant percentages, so it needed no change. The toggle never changes
 how items are entered or stored.
 
 **Acceptance criteria**
@@ -41,9 +53,14 @@ how items are entered or stored.
   entry frequency
 - Normalization math is covered by unit tests (see R-QA-1)
 
-**Migration:** existing `?data=` links have no per-item frequency. On load,
-items without a frequency field inherit the frequency implied by the link's
-existing global mode. This must not crash or silently misvalue old links.
+**Migration:** existing `?data=` links have no per-item frequency. Since the
+old UI's per-add period selector was never persisted (see correction above),
+there is also no per-link "global mode" to read: every pre-1.3 stored amount
+is already annual, because the old UI normalized to annual before storing,
+unconditionally. On load, items without a frequency field are backfilled to
+`'annual'` — this is an assumption made explicit in code and in the
+migration-count reporting, not intent recovered from the link. This must not
+crash or silently misvalue old links.
 
 ---
 

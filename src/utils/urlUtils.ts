@@ -62,7 +62,7 @@ export const hasIssues = (issues: LoadIssues): boolean =>
  * frequency, ...). A migration must be registered in MIGRATIONS for every
  * version below this one.
  */
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 // A simpler and more URL-friendly encoding scheme.
 // Returns null (not "") on failure, so a write failure stays distinguishable
@@ -166,6 +166,19 @@ const validateItem = (raw: unknown, issues: LoadIssues): CashflowItem | null => 
 
   let repaired = typeof raw.amount !== 'number';
 
+  let frequency: CashflowItem['frequency'];
+  if (raw.frequency === 'monthly' || raw.frequency === 'annual') {
+    frequency = raw.frequency;
+  } else {
+    // Not "old" — a version below current is backfilled by the v2->v3
+    // migration before this ever runs. A missing/invalid frequency here
+    // means a current-shape payload had a bad value (hand-edited URL,
+    // typo'd "weekly"), which is validateItem's job to coerce, same as a
+    // bad id or name.
+    frequency = 'annual';
+    repaired = true;
+  }
+
   let id: string;
   if (typeof raw.id === 'string' && raw.id.trim() !== '') {
     id = raw.id;
@@ -186,7 +199,7 @@ const validateItem = (raw: unknown, issues: LoadIssues): CashflowItem | null => 
 
   if (repaired) issues.repaired += 1;
 
-  const item: CashflowItem = { id, name, amount };
+  const item: CashflowItem = { id, name, amount, frequency };
   // Cosmetic and optional: kept when usable, stripped without comment when not.
   if (typeof raw.color === 'string') item.color = raw.color;
   if (typeof raw.emoji === 'string') item.emoji = raw.emoji;
@@ -211,9 +224,11 @@ const validateItems = (raw: unknown, issues: LoadIssues): CashflowItem[] => {
  * data is usable (that's validateItem's job, unchanged).
  *
  * A migration may touch the whole record (a version whose backfill needs
- * global state, e.g. PR 1.3's frequency inference) or map over a single raw
- * item (e.g. PR 1.2's per-item emoji extraction) — this signature supports
- * both, since either just returns a transformed record.
+ * global state — no real migration has needed this yet; PR 1.3's frequency
+ * backfill turned out not to, see `migrateFrequencyField`) or map over a
+ * single raw item (e.g. PR 1.2's per-item emoji extraction, PR 1.3's
+ * per-item frequency stamp) — this signature supports both, since either
+ * just returns a transformed record.
  *
  * Each migration receives `issues` and must increment `issues.migrated`
  * itself, once per item it actually changes. Items already in the shape a
@@ -296,12 +311,51 @@ const migrateEmojiField: Migration = (record, issues) => {
 };
 
 /**
+ * v2 -> v3: backfill `frequency` on items that predate it (R-DM-1).
+ *
+ * IMPORTANT — this is an assumption, not recovered intent. The pre-1.3 UI's
+ * monthly/annual period selector was never persisted: it converted a typed
+ * monthly figure to annual *before* the item was constructed, then threw the
+ * choice away. So a v2 item entered as $500/month and one entered as
+ * $6,000/year are byte-for-byte identical on disk — nothing distinguishes
+ * them. Every v2 item that was ever serialized has an annual `amount` by
+ * construction (the entry-time conversion always ran before storage), so
+ * `'annual'` is the only value that doesn't invent a monthly entry-frequency
+ * that was never recorded. Nobody reading `migrated` counts or a `frequency`
+ * value on a pre-1.3 item should mistake this backfill for a preserved user
+ * choice — it isn't one, because the app never had one to preserve.
+ *
+ * (This also means there is no "global mode" to read off the record here,
+ * unlike what an earlier draft of the implementation plan assumed — see
+ * REQUIREMENTS.md R-DM-1. The pipeline shape from PR 1.1 still fits: this is
+ * just a per-item migration like `migrateEmojiField`, mapping over both
+ * lists and counting only the items it actually touches.)
+ */
+const migrateFrequencyField: Migration = (record, issues) => {
+  const migrateItem = (raw: unknown): unknown => {
+    if (!isRecord(raw) || raw.frequency === 'monthly' || raw.frequency === 'annual') {
+      return raw;
+    }
+
+    issues.migrated += 1;
+    return { ...raw, frequency: 'annual' };
+  };
+
+  return {
+    ...record,
+    incomes: Array.isArray(record.incomes) ? record.incomes.map(migrateItem) : record.incomes,
+    expenses: Array.isArray(record.expenses) ? record.expenses.map(migrateItem) : record.expenses,
+  };
+};
+
+/**
  * Keyed by the version a payload arrives as; migrates it one step forward.
  * Exported so tests can chain synthetic migrations without waiting for a
  * real schema change to exist.
  */
 const MIGRATIONS: Record<number, Migration> = {
   1: migrateEmojiField,
+  2: migrateFrequencyField,
 };
 
 export const runMigrations = (

@@ -8,27 +8,33 @@ import type { CashflowState } from "@/types/cashflow";
 // Generated from the real sample budget in src/pages/Index.tsx, with stable ids
 // substituted for crypto.randomUUID(). Do not hand-edit the encoded string.
 
-/** The 16-item sample budget, exactly as Index.tsx seeds it. */
+/**
+ * The 16-item sample budget, exactly as Index.tsx seeds it. `frequency:
+ * "annual"` on every item reflects reality, not a stand-in: pre-PR-1.3, the
+ * app only ever stored annual amounts (see the v2->v3 migration comment in
+ * urlUtils.ts), so this is what every item's frequency has always actually
+ * been.
+ */
 export const SAMPLE_BUDGET: CashflowState = {
   incomes: [
-    { id: "9f1c0a3e-1b2d-4c5e-8f70-a1b2c3d4e5f6", name: "💵 Paycheck", amount: 54132 },
-    { id: "2a7b4c6d-8e9f-4a1b-9c2d-3e4f5a6b7c8d", name: "💰 Side Gig", amount: 5000 },
-    { id: "5c3d1e7f-6a8b-49c0-b1d2-e3f4a5b6c7d8", name: "🤑 Interest", amount: 500 },
-    { id: "8e6f2a4b-3c5d-4e7f-a890-b1c2d3e4f5a6", name: "📈 Dividends", amount: 500 },
-    { id: "1b9d7e5c-4a3f-4b8e-9d0c-f1a2b3c4d5e6", name: "💳 Credit Card Cashback", amount: 100 },
+    { id: "9f1c0a3e-1b2d-4c5e-8f70-a1b2c3d4e5f6", name: "💵 Paycheck", amount: 54132, frequency: "annual" },
+    { id: "2a7b4c6d-8e9f-4a1b-9c2d-3e4f5a6b7c8d", name: "💰 Side Gig", amount: 5000, frequency: "annual" },
+    { id: "5c3d1e7f-6a8b-49c0-b1d2-e3f4a5b6c7d8", name: "🤑 Interest", amount: 500, frequency: "annual" },
+    { id: "8e6f2a4b-3c5d-4e7f-a890-b1c2d3e4f5a6", name: "📈 Dividends", amount: 500, frequency: "annual" },
+    { id: "1b9d7e5c-4a3f-4b8e-9d0c-f1a2b3c4d5e6", name: "💳 Credit Card Cashback", amount: 100, frequency: "annual" },
   ],
   expenses: [
-    { id: "3f8a1c9e-7d2b-4f6a-8c1e-9b0d2f4a6c8e", name: "🏡 Housing", amount: 16608 },
-    { id: "6d2e8b4f-1a9c-4d3e-b7f0-2c4e6a8b0d2f", name: "🍔 Food", amount: 8172 },
-    { id: "9a4c6e8b-2d1f-4a7c-9e3b-5f7a9c1e3b5d", name: "🏥 Healthcare", amount: 7610 },
-    { id: "4b7d9f1a-5c3e-4b9d-8a2f-6c8e0a2c4e6b", name: "🚙 Transportation", amount: 5676 },
-    { id: "7e1a3c5d-9b7f-4e1a-b3c5-d7f9a1c3e5b7", name: "🎓 Education", amount: 5000 },
-    { id: "2c5e7a9b-4d6f-4c8a-9b1d-3e5a7c9e1b3d", name: "🏝️ Vacation", amount: 4940 },
-    { id: "5a8c0e2b-7f9d-4a2c-8e0b-4d6f8a0c2e4b", name: "💡 Utilities", amount: 4475 },
-    { id: "8d0f2b4c-1e3a-4d5f-9b7c-5a7c9e1b3d5f", name: "🛍️ Shopping", amount: 3000 },
-    { id: "1f3b5d7a-8c0e-4f2b-a4d6-6b8d0f2a4c6e", name: "🎭 Entertainment", amount: 1500 },
-    { id: "4a6c8e0d-2b4f-4a6c-b8e0-7c9e1a3c5e7a", name: "🎁 Gifts", amount: 1000 },
-    { id: "7c9e1b3d-5a7f-4c9e-8b0d-8d0f2b4d6f8a", name: "🎗️ Charity", amount: 1000 },
+    { id: "3f8a1c9e-7d2b-4f6a-8c1e-9b0d2f4a6c8e", name: "🏡 Housing", amount: 16608, frequency: "annual" },
+    { id: "6d2e8b4f-1a9c-4d3e-b7f0-2c4e6a8b0d2f", name: "🍔 Food", amount: 8172, frequency: "annual" },
+    { id: "9a4c6e8b-2d1f-4a7c-9e3b-5f7a9c1e3b5d", name: "🏥 Healthcare", amount: 7610, frequency: "annual" },
+    { id: "4b7d9f1a-5c3e-4b9d-8a2f-6c8e0a2c4e6b", name: "🚙 Transportation", amount: 5676, frequency: "annual" },
+    { id: "7e1a3c5d-9b7f-4e1a-b3c5-d7f9a1c3e5b7", name: "🎓 Education", amount: 5000, frequency: "annual" },
+    { id: "2c5e7a9b-4d6f-4c8a-9b1d-3e5a7c9e1b3d", name: "🏝️ Vacation", amount: 4940, frequency: "annual" },
+    { id: "5a8c0e2b-7f9d-4a2c-8e0b-4d6f8a0c2e4b", name: "💡 Utilities", amount: 4475, frequency: "annual" },
+    { id: "8d0f2b4c-1e3a-4d5f-9b7c-5a7c9e1b3d5f", name: "🛍️ Shopping", amount: 3000, frequency: "annual" },
+    { id: "1f3b5d7a-8c0e-4f2b-a4d6-6b8d0f2a4c6e", name: "🎭 Entertainment", amount: 1500, frequency: "annual" },
+    { id: "4a6c8e0d-2b4f-4a6c-b8e0-7c9e1a3c5e7a", name: "🎁 Gifts", amount: 1000, frequency: "annual" },
+    { id: "7c9e1b3d-5a7f-4c9e-8b0d-8d0f2b4d6f8a", name: "🎗️ Charity", amount: 1000, frequency: "annual" },
   ],
 };
 
@@ -56,48 +62,55 @@ export const VARIATION_SELECTOR_NAMES = [
 ] as const;
 
 /**
- * The expected result of running the v1->v2 emoji migration (PR 1.2) over
- * SAMPLE_BUDGET_HREF. Written out by hand, item by item, rather than derived
- * by calling the migration on SAMPLE_BUDGET — a fixture produced by the code
- * under test would only ever prove the migration agrees with itself. Ids and
- * amounts are unchanged from SAMPLE_BUDGET; every `name` had its leading
- * emoji split into `emoji`, since every item in the sample data is in the
- * detectable "emoji, space, text" shape.
+ * The expected result of running the full migration chain (PR 1.2's emoji
+ * split, then PR 1.3's frequency backfill) over SAMPLE_BUDGET_HREF, a v1
+ * payload with neither field. Written out by hand, item by item, rather than
+ * derived by calling the migrations on SAMPLE_BUDGET — a fixture produced by
+ * the code under test would only ever prove the migrations agree with
+ * themselves. Ids and amounts are unchanged from SAMPLE_BUDGET; every `name`
+ * had its leading emoji split into `emoji` (every item in the sample data is
+ * in the detectable "emoji, space, text" shape), and every item gets
+ * `frequency: "annual"` backfilled since the payload predates the field
+ * entirely — see the migration comment in urlUtils.ts on why that backfill
+ * is a documented assumption, not recovered intent.
  */
 export const SAMPLE_BUDGET_MIGRATED: CashflowState = {
   incomes: [
-    { id: "9f1c0a3e-1b2d-4c5e-8f70-a1b2c3d4e5f6", emoji: "💵", name: "Paycheck", amount: 54132 },
-    { id: "2a7b4c6d-8e9f-4a1b-9c2d-3e4f5a6b7c8d", emoji: "💰", name: "Side Gig", amount: 5000 },
-    { id: "5c3d1e7f-6a8b-49c0-b1d2-e3f4a5b6c7d8", emoji: "🤑", name: "Interest", amount: 500 },
-    { id: "8e6f2a4b-3c5d-4e7f-a890-b1c2d3e4f5a6", emoji: "📈", name: "Dividends", amount: 500 },
+    { id: "9f1c0a3e-1b2d-4c5e-8f70-a1b2c3d4e5f6", emoji: "💵", name: "Paycheck", amount: 54132, frequency: "annual" },
+    { id: "2a7b4c6d-8e9f-4a1b-9c2d-3e4f5a6b7c8d", emoji: "💰", name: "Side Gig", amount: 5000, frequency: "annual" },
+    { id: "5c3d1e7f-6a8b-49c0-b1d2-e3f4a5b6c7d8", emoji: "🤑", name: "Interest", amount: 500, frequency: "annual" },
+    { id: "8e6f2a4b-3c5d-4e7f-a890-b1c2d3e4f5a6", emoji: "📈", name: "Dividends", amount: 500, frequency: "annual" },
     {
       id: "1b9d7e5c-4a3f-4b8e-9d0c-f1a2b3c4d5e6",
       emoji: "💳",
       name: "Credit Card Cashback",
       amount: 100,
+      frequency: "annual",
     },
   ],
   expenses: [
-    { id: "3f8a1c9e-7d2b-4f6a-8c1e-9b0d2f4a6c8e", emoji: "🏡", name: "Housing", amount: 16608 },
-    { id: "6d2e8b4f-1a9c-4d3e-b7f0-2c4e6a8b0d2f", emoji: "🍔", name: "Food", amount: 8172 },
-    { id: "9a4c6e8b-2d1f-4a7c-9e3b-5f7a9c1e3b5d", emoji: "🏥", name: "Healthcare", amount: 7610 },
+    { id: "3f8a1c9e-7d2b-4f6a-8c1e-9b0d2f4a6c8e", emoji: "🏡", name: "Housing", amount: 16608, frequency: "annual" },
+    { id: "6d2e8b4f-1a9c-4d3e-b7f0-2c4e6a8b0d2f", emoji: "🍔", name: "Food", amount: 8172, frequency: "annual" },
+    { id: "9a4c6e8b-2d1f-4a7c-9e3b-5f7a9c1e3b5d", emoji: "🏥", name: "Healthcare", amount: 7610, frequency: "annual" },
     {
       id: "4b7d9f1a-5c3e-4b9d-8a2f-6c8e0a2c4e6b",
       emoji: "🚙",
       name: "Transportation",
       amount: 5676,
+      frequency: "annual",
     },
-    { id: "7e1a3c5d-9b7f-4e1a-b3c5-d7f9a1c3e5b7", emoji: "🎓", name: "Education", amount: 5000 },
-    { id: "2c5e7a9b-4d6f-4c8a-9b1d-3e5a7c9e1b3d", emoji: "🏝️", name: "Vacation", amount: 4940 },
-    { id: "5a8c0e2b-7f9d-4a2c-8e0b-4d6f8a0c2e4b", emoji: "💡", name: "Utilities", amount: 4475 },
-    { id: "8d0f2b4c-1e3a-4d5f-9b7c-5a7c9e1b3d5f", emoji: "🛍️", name: "Shopping", amount: 3000 },
+    { id: "7e1a3c5d-9b7f-4e1a-b3c5-d7f9a1c3e5b7", emoji: "🎓", name: "Education", amount: 5000, frequency: "annual" },
+    { id: "2c5e7a9b-4d6f-4c8a-9b1d-3e5a7c9e1b3d", emoji: "🏝️", name: "Vacation", amount: 4940, frequency: "annual" },
+    { id: "5a8c0e2b-7f9d-4a2c-8e0b-4d6f8a0c2e4b", emoji: "💡", name: "Utilities", amount: 4475, frequency: "annual" },
+    { id: "8d0f2b4c-1e3a-4d5f-9b7c-5a7c9e1b3d5f", emoji: "🛍️", name: "Shopping", amount: 3000, frequency: "annual" },
     {
       id: "1f3b5d7a-8c0e-4f2b-a4d6-6b8d0f2a4c6e",
       emoji: "🎭",
       name: "Entertainment",
       amount: 1500,
+      frequency: "annual",
     },
-    { id: "4a6c8e0d-2b4f-4a6c-b8e0-7c9e1a3c5e7a", emoji: "🎁", name: "Gifts", amount: 1000 },
-    { id: "7c9e1b3d-5a7f-4c9e-8b0d-8d0f2b4d6f8a", emoji: "🎗️", name: "Charity", amount: 1000 },
+    { id: "4a6c8e0d-2b4f-4a6c-b8e0-7c9e1a3c5e7a", emoji: "🎁", name: "Gifts", amount: 1000, frequency: "annual" },
+    { id: "7c9e1b3d-5a7f-4c9e-8b0d-8d0f2b4d6f8a", emoji: "🎗️", name: "Charity", amount: 1000, frequency: "annual" },
   ],
 };

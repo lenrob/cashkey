@@ -1,8 +1,14 @@
 
+export type Frequency = 'monthly' | 'annual';
+
 export interface CashflowItem {
   id: string;
   name: string;
+  /** Always normalized to annual, regardless of `frequency`. */
   amount: number;
+  /** The unit the item was entered in. Display-only elsewhere; never
+   *  changes what `amount` means. */
+  frequency: Frequency;
   emoji?: string;
   color?: string;
 }

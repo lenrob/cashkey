@@ -110,8 +110,8 @@ describe("encodeState / decodeState round-trip", () => {
 
   it("preserves amount precision, including decimals and zero", () => {
     const state: CashflowState = {
-      incomes: [{ id: "a", name: "Odd", amount: 1234.56 }],
-      expenses: [{ id: "b", name: "Zero", amount: 0 }],
+      incomes: [{ id: "a", name: "Odd", amount: 1234.56, frequency: "annual" }],
+      expenses: [{ id: "b", name: "Zero", amount: 0, frequency: "annual" }],
     };
     const decoded = stateOf(decodeState(encodeOk(state)));
     expect(decoded.incomes[0].amount).toBe(1234.56);
@@ -120,7 +120,7 @@ describe("encodeState / decodeState round-trip", () => {
 
   it("preserves the optional color field when present", () => {
     const state: CashflowState = {
-      incomes: [{ id: "a", name: "Paid", amount: 1, color: "#ff0000" }],
+      incomes: [{ id: "a", name: "Paid", amount: 1, frequency: "annual", color: "#ff0000" }],
       expenses: [],
     };
     expect(stateOf(decodeState(encodeOk(state))).incomes[0].color).toBe("#ff0000");
@@ -138,7 +138,7 @@ describe("multi-codepoint emoji", () => {
   it.each(VARIATION_SELECTOR_NAMES)("round-trips %s byte-for-byte", (name) => {
     const state: CashflowState = {
       incomes: [],
-      expenses: [{ id: "x", name, amount: 1 }],
+      expenses: [{ id: "x", name, amount: 1, frequency: "annual" }],
     };
     expect(stateOf(decodeState(encodeOk(state))).expenses[0].name).toBe(name);
   });
@@ -153,7 +153,7 @@ describe("multi-codepoint emoji", () => {
 
     const state: CashflowState = {
       incomes: [],
-      expenses: [{ id: "x", name, amount: 4940 }],
+      expenses: [{ id: "x", name, amount: 4940, frequency: "annual" }],
     };
     const decoded = stateOf(decodeState(encodeOk(state))).expenses[0].name;
     expect([...decoded].length).toBe(11);
@@ -166,16 +166,19 @@ describe("multi-codepoint emoji", () => {
     expect(
       encodeState({
         incomes: [],
-        expenses: [{ id: "x", name: "🏝️", amount: 1 }],
+        expenses: [{ id: "x", name: "🏝️", amount: 1, frequency: "annual" }],
       }),
     ).toContain("%EF%B8%8F");
   });
 });
 
 describe("v1 -> v2 emoji migration", () => {
+  // Every raw item here carries an explicit frequency so the v2->v3
+  // frequency migration (unrelated to what this block tests) never fires
+  // and never inflates `migrated` — this block is isolated to emoji.
   const migrate = (name: string) => {
     const result = decodeJson(
-      `{"version":1,"incomes":[],"expenses":[{"id":"x","name":${JSON.stringify(name)},"amount":1}]}`,
+      `{"version":1,"incomes":[],"expenses":[{"id":"x","name":${JSON.stringify(name)},"amount":1,"frequency":"annual"}]}`,
     );
     const item = stateOf(result).expenses[0];
     return { emoji: item.emoji, name: item.name, migrated: issuesOf(result).migrated };
@@ -255,10 +258,52 @@ describe("v1 -> v2 emoji migration", () => {
 
   it("leaves an item that already has an emoji field untouched and uncounted", () => {
     const result = decodeJson(
-      '{"version":1,"incomes":[],"expenses":[{"id":"x","name":"Housing","emoji":"🏠","amount":1}]}',
+      '{"version":1,"incomes":[],"expenses":[{"id":"x","name":"Housing","emoji":"🏠","amount":1,"frequency":"annual"}]}',
     );
     const item = stateOf(result).expenses[0];
     expect(item).toMatchObject({ name: "Housing", emoji: "🏠" });
+    expect(issuesOf(result).migrated).toBe(0);
+  });
+});
+
+describe("v2 -> v3 frequency migration", () => {
+  it("backfills a v2 item with no frequency to 'annual' and counts it migrated", () => {
+    const result = decodeJson(
+      '{"version":2,"incomes":[],"expenses":[{"id":"x","name":"Housing","amount":16608}]}',
+    );
+    const item = stateOf(result).expenses[0];
+    expect(item.frequency).toBe("annual");
+    expect(issuesOf(result).migrated).toBe(1);
+  });
+
+  it("leaves a v2 item that already carries a valid frequency untouched and uncounted", () => {
+    const result = decodeJson(
+      '{"version":2,"incomes":[],"expenses":[{"id":"x","name":"Housing","amount":16608,"frequency":"monthly"}]}',
+    );
+    const item = stateOf(result).expenses[0];
+    expect(item.frequency).toBe("monthly");
+    expect(issuesOf(result).migrated).toBe(0);
+  });
+
+  it("backfills every v1 item on the way through (chained with the emoji migration)", () => {
+    const result = decodeJson(
+      '{"version":1,"incomes":[],"expenses":[{"id":"x","name":"🏡 Housing","amount":16608}]}',
+    );
+    const item = stateOf(result).expenses[0];
+    expect(item).toMatchObject({ emoji: "🏡", name: "Housing", frequency: "annual" });
+    expect(issuesOf(result).migrated).toBe(2);
+  });
+
+  it("treats a malformed frequency on a current-version payload as repaired, not migrated", () => {
+    // A current-shape payload with a bad value (hand-edited URL, typo'd
+    // "weekly") is wrong data, not old data — validateItem's job, not the
+    // migration pipeline's.
+    const result = decodeJson(
+      `{"version":${CURRENT_SCHEMA_VERSION},"incomes":[{"id":"x","name":"n","amount":1,"frequency":"weekly"}],"expenses":[]}`,
+    );
+    const item = stateOf(result).incomes[0];
+    expect(item.frequency).toBe("annual");
+    expect(issuesOf(result).repaired).toBe(1);
     expect(issuesOf(result).migrated).toBe(0);
   });
 });
@@ -355,7 +400,7 @@ describe("item validation", () => {
 
   it("counts a negative amount separately from a malformed one", () => {
     const result = decodeJson(
-      '{"incomes":[],"expenses":[{"id":"x","name":"Refund","amount":-450},{"id":"y","name":"Bad","amount":"nope"}]}',
+      '{"incomes":[],"expenses":[{"id":"x","name":"Refund","amount":-450,"frequency":"annual"},{"id":"y","name":"Bad","amount":"nope","frequency":"annual"}]}',
     );
     expect(stateOf(result).expenses).toEqual([]);
     expect(issuesOf(result)).toEqual({
@@ -410,15 +455,20 @@ describe("item validation", () => {
     const result = decodeJson(
       '{"incomes":[{"id":"x","name":"n","amount":1,"evil":"<script>"}],"expenses":[]}',
     );
-    expect(stateOf(result).incomes[0]).toEqual({ id: "x", name: "n", amount: 1 });
+    expect(stateOf(result).incomes[0]).toEqual({
+      id: "x",
+      name: "n",
+      amount: 1,
+      frequency: "annual",
+    });
   });
 
   it("keeps the good items when only some are bad", () => {
     const result = decodeJson(
-      '{"incomes":[{"id":"a","name":"Good","amount":100},{"junk":1},{"id":"c","name":"Neg","amount":-5}],"expenses":[]}',
+      '{"incomes":[{"id":"a","name":"Good","amount":100,"frequency":"annual"},{"junk":1,"frequency":"annual"},{"id":"c","name":"Neg","amount":-5,"frequency":"annual"}],"expenses":[]}',
     );
     expect(stateOf(result).incomes).toEqual([
-      { id: "a", name: "Good", amount: 100 },
+      { id: "a", name: "Good", amount: 100, frequency: "annual" },
     ]);
     expect(issuesOf(result)).toEqual({
       repaired: 0,
@@ -562,7 +612,7 @@ describe("double encoding", () => {
     // Decoding first would turn "100%20 off" into "100 off" with no error
     // raised. Parsing first means an already-decoded payload is never touched.
     const state: CashflowState = {
-      incomes: [{ id: "a", name: "100%20 off", amount: 1 }],
+      incomes: [{ id: "a", name: "100%20 off", amount: 1, frequency: "annual" }],
       expenses: [],
     };
     expect(stateOf(decodeState(JSON.stringify(state))).incomes[0].name).toBe(
@@ -572,7 +622,7 @@ describe("double encoding", () => {
 
   it("survives a % in a name at one layer or two", () => {
     const state: CashflowState = {
-      incomes: [{ id: "a", name: "50% Rule", amount: 1 }],
+      incomes: [{ id: "a", name: "50% Rule", amount: 1, frequency: "annual" }],
       expenses: [],
     };
 
@@ -666,13 +716,14 @@ describe("the real-world share link", () => {
     expect(stateOf(result).incomes).toHaveLength(5);
     expect(stateOf(result).expenses).toHaveLength(11);
     expect(stateOf(result)).toEqual(SAMPLE_BUDGET_MIGRATED);
-    // Every item's emoji was migrated out of its name, so migrated is the
-    // only nonzero issue count — nothing was repaired or dropped.
+    // Every item's emoji was migrated out of its name (16) and every item
+    // also had frequency backfilled (16), so migrated is the only nonzero
+    // issue count — nothing was repaired or dropped.
     expect(issuesOf(result)).toEqual({
       repaired: 0,
       droppedMalformed: 0,
       droppedNegative: 0,
-      migrated: 16,
+      migrated: 32,
     });
   });
 
@@ -720,12 +771,13 @@ describe("schema version envelope", () => {
     // The 2,971-character fixture predates the version field entirely — this
     // is the permanent regression anchor every future migration must satisfy.
     // Since PR 1.2, "loads cleanly" means "migrates cleanly": every item's
-    // emoji is detectable, so all 16 are migrated rather than left alone.
+    // emoji is detectable (16 migrated) and, since PR 1.3, every item also
+    // gets frequency backfilled (16 more) — 32 total.
     stubWindow(SAMPLE_BUDGET_HREF);
     const result = getStateFromUrl();
 
     expect(stateOf(result)).toEqual(SAMPLE_BUDGET_MIGRATED);
-    expect(issuesOf(result).migrated).toBe(16);
+    expect(issuesOf(result).migrated).toBe(32);
   });
 
   it("rejects a version newer than this build knows how to migrate", () => {

@@ -1,52 +1,50 @@
 import React, { useState } from 'react';
-import { CashflowItem } from '@/types/cashflow';
+import { CashflowItem, Frequency } from '@/types/cashflow';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Plus, Trash2, DollarSign, Pencil, Check, X } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatCurrency, itemDisplayName } from '@/utils/cashflowUtils';
+import { formatCurrency, itemDisplayName, toAnnual, fromAnnual } from '@/utils/cashflowUtils';
 import EmojiPicker from './EmojiPicker';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from '@/components/ui/select';
 
 interface ExpenseSectionProps {
   expenses: CashflowItem[];
   onUpdateExpenses: (expenses: CashflowItem[]) => void;
+  displayFrequency: Frequency;
 }
 
-const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpenses }) => {
+const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpenses, displayFrequency }) => {
   const [newExpenseName, setNewExpenseName] = useState('');
   const [newExpenseEmoji, setNewExpenseEmoji] = useState('');
   const [newExpenseAmount, setNewExpenseAmount] = useState('');
-  const [newExpensePeriod, setNewExpensePeriod] = useState('annual');
+  const [newExpensePeriod, setNewExpensePeriod] = useState<Frequency>('annual');
   const [editingExpense, setEditingExpense] = useState<CashflowItem | null>(null);
   const [editName, setEditName] = useState('');
   const [editEmoji, setEditEmoji] = useState('');
   const [editAmount, setEditAmount] = useState('');
+  const [editPeriod, setEditPeriod] = useState<Frequency>('annual');
   const isMobile = useIsMobile();
 
   const handleAddExpense = () => {
     if (!newExpenseName || !newExpenseAmount) return;
 
-    let amount = parseInt(newExpenseAmount.replace(/[^0-9]/g, ''));
-    if (isNaN(amount) || amount <= 0) return;
-
-    // Convert monthly amount to annual if needed
-    if (newExpensePeriod === 'monthly') {
-      amount = amount * 12;
-    }
+    const typedAmount = parseInt(newExpenseAmount.replace(/[^0-9]/g, ''));
+    if (isNaN(typedAmount) || typedAmount <= 0) return;
 
     const newExpense: CashflowItem = {
       id: crypto.randomUUID(),
       name: newExpenseName,
-      amount: amount,
+      amount: toAnnual(typedAmount, newExpensePeriod),
+      frequency: newExpensePeriod,
       ...(newExpenseEmoji ? { emoji: newExpenseEmoji } : {}),
     };
 
@@ -64,18 +62,27 @@ const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpen
     setEditingExpense(expense);
     setEditName(expense.name);
     setEditEmoji(expense.emoji ?? '');
-    setEditAmount(expense.amount.toString());
+    // Seeded in the item's own entry frequency, not the global display
+    // toggle — editing round-trips in the unit it was entered in.
+    setEditAmount(Math.round(fromAnnual(expense.amount, expense.frequency)).toString());
+    setEditPeriod(expense.frequency);
   };
 
   const handleSaveEdit = () => {
     if (!editingExpense || !editName || !editAmount) return;
 
-    const amount = parseInt(editAmount.replace(/[^0-9]/g, ''));
-    if (isNaN(amount) || amount <= 0) return;
+    const typedAmount = parseInt(editAmount.replace(/[^0-9]/g, ''));
+    if (isNaN(typedAmount) || typedAmount <= 0) return;
 
     onUpdateExpenses(expenses.map(expense =>
       expense.id === editingExpense.id
-        ? { ...expense, name: editName, amount: amount, emoji: editEmoji || undefined }
+        ? {
+            ...expense,
+            name: editName,
+            amount: toAnnual(typedAmount, editPeriod),
+            frequency: editPeriod,
+            emoji: editEmoji || undefined,
+          }
         : expense
     ));
     setEditingExpense(null);
@@ -99,7 +106,7 @@ const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpen
     <Card className="shadow-soft animate-fade-in [animation-delay:100ms]">
       <CardHeader className="pb-3">
         <CardTitle className="text-xl font-medium text-expense flex items-center">
-          Annual Expenses
+          Expenses
         </CardTitle>
         <p className="text-xs text-muted-foreground mt-1">Tap an item to edit it.</p>
       </CardHeader>
@@ -131,21 +138,38 @@ const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpen
                           onKeyDown={handleKeyDown}
                         />
                       </div>
-                      <div className="relative">
-                        <DollarSign className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input
-                          value={editAmount}
-                          onChange={(e) => setEditAmount(e.target.value)}
-                          type="number"
-                          min="0"
-                          step="100"
-                          className={cn(
-                            "pl-6 w-full no-spin",
-                            isMobile && "text-sm"
-                          )}
-                          onKeyDown={handleKeyDown}
-                          onClick={(e) => e.stopPropagation()}
-                        />
+                      <div className="relative flex gap-2">
+                        <div className="relative flex-1">
+                          <DollarSign className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                          <Input
+                            value={editAmount}
+                            onChange={(e) => setEditAmount(e.target.value)}
+                            type="number"
+                            min="0"
+                            step="100"
+                            className={cn(
+                              "pl-6 w-full no-spin",
+                              isMobile && "text-sm"
+                            )}
+                            onKeyDown={handleKeyDown}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </div>
+                        <Select
+                          value={editPeriod}
+                          onValueChange={(value) => setEditPeriod(value as Frequency)}
+                        >
+                          <SelectTrigger
+                            className={cn("w-[90px] flex-shrink-0", isMobile && "text-sm")}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <SelectValue placeholder="Period" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="annual">Annual</SelectItem>
+                            <SelectItem value="monthly">Monthly</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
                     <div className="flex gap-2">
@@ -177,7 +201,10 @@ const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpen
                   <>
               <div className="flex-1 mr-4">
                 <p className="font-medium">{itemDisplayName(expense)}</p>
-                <p className="text-muted-foreground">{formatCurrency(expense.amount)}/year</p>
+                <p className="text-muted-foreground">
+                  {formatCurrency(fromAnnual(expense.amount, displayFrequency))}/
+                  {displayFrequency === 'monthly' ? 'month' : 'year'}
+                </p>
               </div>
               <Button 
                 variant="ghost" 
@@ -225,7 +252,7 @@ const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, onUpdateExpen
               </div>
               <Select
                 value={newExpensePeriod}
-                onValueChange={setNewExpensePeriod}
+                onValueChange={(value) => setNewExpensePeriod(value as Frequency)}
               >
                 <SelectTrigger className={cn(
                   "w-[90px]",

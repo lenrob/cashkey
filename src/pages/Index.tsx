@@ -120,29 +120,30 @@ const Index = () => {
     // status === "absent": no data parameter, so this is a first visit.
     // Sample data for first-time users with realistic U.S. median values
     setIncomes([
-      { id: crypto.randomUUID(), name: "💵 Paycheck", amount: 54132 }, // Median U.S. annual salary
-      { id: crypto.randomUUID(), name: "💰 Side Gig", amount: 5000 }, // As specified
-      { id: crypto.randomUUID(), name: "🤑 Interest", amount: 500 }, // As specified
-      { id: crypto.randomUUID(), name: "📈 Dividends", amount: 500 }, // As specified
+      { id: crypto.randomUUID(), name: "💵 Paycheck", amount: 54132, frequency: "annual" }, // Median U.S. annual salary
+      { id: crypto.randomUUID(), name: "💰 Side Gig", amount: 5000, frequency: "annual" }, // As specified
+      { id: crypto.randomUUID(), name: "🤑 Interest", amount: 500, frequency: "annual" }, // As specified
+      { id: crypto.randomUUID(), name: "📈 Dividends", amount: 500, frequency: "annual" }, // As specified
       {
         id: crypto.randomUUID(),
         name: "💳 Credit Card Cashback",
         amount: 100,
+        frequency: "annual",
       }, // As specified
     ]);
 
     setExpenses([
-      { id: crypto.randomUUID(), name: "🏡 Housing", amount: 16608 }, // Median U.S. rent for 1-bedroom ($1,384/month)
-      { id: crypto.randomUUID(), name: "🍔 Food", amount: 8172 }, // Median U.S. food expense ($681/month)
-      { id: crypto.randomUUID(), name: "🏥 Healthcare", amount: 7610 }, // $6,468 Silver plan 1 person + $1,142 out of pocket annually
-      { id: crypto.randomUUID(), name: "🚙 Transportation", amount: 5676 }, // Median U.S. car lease payment ($473/month)
-      { id: crypto.randomUUID(), name: "🎓 Education", amount: 5000 },
-      { id: crypto.randomUUID(), name: "🏝️ Vacation", amount: 4940 },
-      { id: crypto.randomUUID(), name: "💡 Utilities", amount: 4475 },
-      { id: crypto.randomUUID(), name: "🛍️ Shopping", amount: 3000 },
-      { id: crypto.randomUUID(), name: "🎭 Entertainment", amount: 1500 },
-      { id: crypto.randomUUID(), name: "🎁 Gifts", amount: 1000 },
-      { id: crypto.randomUUID(), name: "🎗️ Charity", amount: 1000 },
+      { id: crypto.randomUUID(), name: "🏡 Housing", amount: 16608, frequency: "annual" }, // Median U.S. rent for 1-bedroom ($1,384/month)
+      { id: crypto.randomUUID(), name: "🍔 Food", amount: 8172, frequency: "annual" }, // Median U.S. food expense ($681/month)
+      { id: crypto.randomUUID(), name: "🏥 Healthcare", amount: 7610, frequency: "annual" }, // $6,468 Silver plan 1 person + $1,142 out of pocket annually
+      { id: crypto.randomUUID(), name: "🚙 Transportation", amount: 5676, frequency: "annual" }, // Median U.S. car lease payment ($473/month)
+      { id: crypto.randomUUID(), name: "🎓 Education", amount: 5000, frequency: "annual" },
+      { id: crypto.randomUUID(), name: "🏝️ Vacation", amount: 4940, frequency: "annual" },
+      { id: crypto.randomUUID(), name: "💡 Utilities", amount: 4475, frequency: "annual" },
+      { id: crypto.randomUUID(), name: "🛍️ Shopping", amount: 3000, frequency: "annual" },
+      { id: crypto.randomUUID(), name: "🎭 Entertainment", amount: 1500, frequency: "annual" },
+      { id: crypto.randomUUID(), name: "🎁 Gifts", amount: 1000, frequency: "annual" },
+      { id: crypto.randomUUID(), name: "🎗️ Charity", amount: 1000, frequency: "annual" },
     ]);
   }, []);
 
