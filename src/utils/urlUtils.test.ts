@@ -593,6 +593,15 @@ describe("describeLoadIssues", () => {
       }),
     ).toBe("2 items had a negative amount.");
   });
+
+  it("uses saved-budget wording for a storage source, not link wording", () => {
+    expect(
+      describeLoadIssues(
+        { repaired: 0, droppedMalformed: 0, droppedNegative: 0, migrated: 1 },
+        "storage",
+      ),
+    ).toBe("1 item updated from an older saved budget format.");
+  });
 });
 
 describe("encodeState failure", () => {

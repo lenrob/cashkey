@@ -460,8 +460,16 @@ const countOf = (n: number) => `${n} item${n === 1 ? '' : 's'}`;
 /**
  * A sentence describing what a load had to change, or null when it changed
  * nothing. Lives here rather than in the component so it can be tested.
+ *
+ * `source` defaults to 'url' so every existing call site (all of them
+ * currently loading from the URL) keeps its wording unchanged. PR 2.1 adds
+ * the 'storage' case: "an older link format" is wrong for a saved budget,
+ * which was never a link.
  */
-export const describeLoadIssues = (issues: LoadIssues): string | null => {
+export const describeLoadIssues = (
+  issues: LoadIssues,
+  source: BudgetSource = 'url',
+): string | null => {
   if (!hasIssues(issues)) return null;
 
   const parts: string[] = [];
@@ -476,7 +484,8 @@ export const describeLoadIssues = (issues: LoadIssues): string | null => {
     parts.push(`${countOf(issues.repaired)} ${verb} repaired`);
   }
   if (issues.migrated > 0) {
-    parts.push(`${countOf(issues.migrated)} updated from an older link format`);
+    const origin = source === 'storage' ? 'an older saved budget format' : 'an older link format';
+    parts.push(`${countOf(issues.migrated)} updated from ${origin}`);
   }
 
   return `${parts.join(', ')}.`;
